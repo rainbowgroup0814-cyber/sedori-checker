@@ -1,6 +1,6 @@
-// 仕入れ判定チェッカー Service Worker v2
-// ネットワーク優先: 常に最新版を取得し、オフライン時のみキャッシュを使う
-const CACHE = "sedori-checker-v2";
+// 仕入れ判定チェッカー Service Worker v3
+// ネットワーク優先＋HTMLはブラウザキャッシュも迂回して常に再検証
+const CACHE = "sedori-checker-v3";
 const ASSETS = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
@@ -18,8 +18,11 @@ self.addEventListener("fetch", e => {
   // APIとCDNはService Workerを通さない
   if (url.hostname === "api.keepa.com" || url.hostname.includes("unpkg.com")) return;
   // ネットワーク優先 → 成功したらキャッシュも更新 → 失敗（オフライン）ならキャッシュ
+  // HTML/ナビゲーションはブラウザのHTTPキャッシュも迂回して常にサーバーへ再確認
+  const isHTML = e.request.mode === "navigate" || (e.request.headers.get("accept") || "").includes("text/html");
+  const req = isHTML ? new Request(e.request, { cache: "no-cache" }) : e.request;
   e.respondWith(
-    fetch(e.request)
+    fetch(req)
       .then(res => {
         if (res.ok && e.request.method === "GET") {
           const clone = res.clone();

@@ -74,7 +74,7 @@
     <label>ASIN または JAN（ISBN）</label>
     <input type="text" id="code" inputmode="text" placeholder="例: 4062195909 / 9784062195904" autocomplete="off">
     <button class="btn-scan" id="btn-scan">📷 バーコードをスキャン</button>
-    <div id="video-wrap"><video id="video" playsinline></video><div id="scan-line"></div></div>
+    <div id="video-wrap"><video id="video" playsinline muted autoplay></video><div id="scan-line"></div></div>
     <label>仕入値（円・空欄なら損益分岐を計算）</label>
     <input type="number" id="cost" inputmode="numeric" placeholder="例: 800">
     <button class="btn-main" id="btn-check">判定する</button>
@@ -506,15 +506,45 @@ function renderHistory(){
 
 /* ---------- バーコードスキャン ---------- */
 let scanner = null;
+function cameraErrorMessage(e){
+  const name = e && e.name;
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    return "このブラウザではカメラが使えません。LINEやInstagramの中のブラウザで開いている場合は、メニューから「ブラウザで開く」→ Chrome/Safariで開き直してください。";
+  }
+  switch(name){
+    case "NotAllowedError": case "PermissionDeniedError":
+      return "カメラの使用がブロックされています。アドレスバーの鍵マーク → 権限 → カメラを「許可」にしてから再度お試しください（スマホの設定 → アプリ → ブラウザ → 権限 の確認も）。";
+    case "NotFoundError": case "DevicesNotFoundError":
+      return "カメラが見つかりませんでした。端末にカメラがあるか確認してください。";
+    case "NotReadableError": case "TrackStartError":
+      return "カメラが他のアプリで使用中です。カメラを使う他のアプリを終了してから再度お試しください。";
+    case "OverconstrainedError":
+      return "この端末のカメラ構成に対応できませんでした。お手数ですがバーコード下の数字を手入力してください。";
+    case "SecurityError":
+      return "セキュリティ設定によりカメラがブロックされました。ブラウザの設定を確認してください。";
+    default:
+      return "カメラを起動できませんでした（" + (name || e.message || "不明なエラー") + "）。バーコード下の13桁の数字を手入力でも判定できます。";
+  }
+}
 $("btn-scan").onclick = async () => {
   const wrap = $("video-wrap");
   if(scanner){ stopScan(); return; }
+  $("check-err").textContent = "";
+  if(typeof ZXing === "undefined"){
+    $("check-err").textContent = "スキャン機能の読み込みに失敗しました。電波の良い場所でページを開き直してください。";
+    return;
+  }
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    $("check-err").textContent = cameraErrorMessage(null);
+    return;
+  }
   wrap.style.display = "block";
   $("btn-scan").textContent = "✕ スキャンを閉じる";
   try {
     scanner = new ZXing.BrowserMultiFormatReader();
+    // 背面カメラ「優先」（ideal指定: 対応できない端末では自動的に使えるカメラへフォールバック）
     const result = await scanner.decodeOnceFromConstraints(
-      { video: { facingMode: "environment" } }, $("video")
+      { video: { facingMode: { ideal: "environment" } } }, $("video")
     );
     const text = result.getText();
     // 書籍は978/979始まりのJANを採用（2段目の192...は無視）
@@ -525,7 +555,7 @@ $("btn-scan").onclick = async () => {
       $("btn-check").click();
     }
   } catch(e){
-    $("check-err").textContent = "カメラを起動できませんでした: " + e.message;
+    $("check-err").textContent = cameraErrorMessage(e);
     stopScan();
   }
 };

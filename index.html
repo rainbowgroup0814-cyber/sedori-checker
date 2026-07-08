@@ -411,6 +411,10 @@ function renderResult(d, j, cost, inputCode){
   if(j.breakeven !== null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
   html += `</table>`;
   if(pastRec) html += `<div class="past">📋 <b>過去仕入れ実績あり</b>: ${pastRec[0]} に ${yen(pastRec[1])} で仕入れ → ${yen(pastRec[2])} で出品${d.price !== null && pastRec[2] > 0 ? `<br>現在相場${yen(d.price)}（当時比 ${Math.round(d.price / pastRec[2] * 100)}%）` : ""}<br><span style="color:#a33">※当時と相場が変わっている可能性あり。判定は現在データ基準です</span></div>`;
+  html += `<div class="row" style="margin-top:12px">
+    <a href="https://keepa.com/#!product/5-${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#37474f; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">📈 Keepaでグラフを見る</a>
+    <a href="https://www.amazon.co.jp/dp/${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#e88b00; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">🛒 Amazonで見る</a>
+  </div>`;
   html += `<div class="note">※判定は過去実績から逆算した基準による参考情報です。最終判断はご自身で。相場は変動します。</div></div>`;
   $("result").innerHTML = html;
 }

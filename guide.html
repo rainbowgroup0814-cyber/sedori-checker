@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仕入れ判定チェッカー テスター向けガイド</title>
+<style>
+  :root{ --green:#1a7f5a; --ink:#222; --sub:#666; --line:#e3e3e3; --bg:#f7f7f5; }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:var(--bg); color:var(--ink); line-height:1.9; font-size:15px;}
+  header{background:var(--green); color:#fff; padding:20px 16px;}
+  header h1{margin:0; font-size:20px;}
+  header p{margin:6px 0 0; font-size:13px; opacity:.9;}
+  main{max-width:600px; margin:0 auto; padding:16px;}
+  section{background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 16px; margin-bottom:16px;}
+  h2{font-size:17px; margin:0 0 10px; color:var(--green); border-bottom:2px solid var(--green); padding-bottom:6px;}
+  h3{font-size:15px; margin:16px 0 6px;}
+  ol,ul{padding-left:22px; margin:8px 0;}
+  li{margin-bottom:6px;}
+  .box{background:#eef5f1; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0;}
+  .warn{background:#fdf6e3;}
+  .danger{background:#fdecea;}
+  code{background:#f0f0ee; padding:2px 6px; border-radius:6px; font-size:13px; word-break:break-all;}
+  table{width:100%; border-collapse:collapse; font-size:13px; margin:10px 0;}
+  td,th{border:1px solid var(--line); padding:8px; text-align:left; vertical-align:top;}
+  th{background:#f4f7f5; white-space:nowrap;}
+  .badge{display:inline-block; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:700; color:#fff;}
+  .b-ok{background:#1a7f5a;} .b-warn{background:#b8860b;} .b-ng{background:#c0392b;}
+  footer{text-align:center; font-size:12px; color:var(--sub); padding:20px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 仕入れ判定チェッカー</h1>
+  <p>テスター向けガイド（テスト版）</p>
+</header>
+<main>
+
+<section>
+  <h2>1. これは何？</h2>
+  <p>中古本せどりの「この本、仕入れていい？」に<b>3秒で答える</b>スマホ用アプリです。バーコードを読むと、Amazonの相場・売れ行きデータ（Keepa）を自動で取得し、経験者の実仕入れデータ約24,000件から作った基準で <b>OK / 条件付きOK / 見送り</b> を理由付きで判定します。</p>
+  <div class="box warn">現在テスト中です。判定がおかしい・使いにくい所を見つけたら、ぜひ教えてください（最後の「フィードバックのお願い」参照）。</div>
+</section>
+
+<section>
+  <h2>2. 必要なもの</h2>
+  <ul>
+    <li>スマホ（iPhone / Android どちらでも）</li>
+    <li><b>KeepaのAPIキー</b>（下記参照）</li>
+  </ul>
+  <h3>APIキーの入手</h3>
+  <ol>
+    <li><a href="https://keepa.com">keepa.com</a> でアカウント登録し、<b>Data API付きプラン</b>（月額制）を契約</li>
+    <li>ログイン後、<code>keepa.com/#!api</code> を開くと「Private API access key」が表示される</li>
+    <li>それをコピーしておく（後で設定画面に貼ります）</li>
+  </ol>
+  <div class="box">💡 テスト期間中、主催者からテスト用キーを渡されている場合は契約不要です。そのキーを使ってください（テスト終了後は無効になります）。</div>
+</section>
+
+<section>
+  <h2>3. インストール（1分）</h2>
+  <p>アプリストアは使いません。URLから直接入れます。</p>
+  <h3>iPhone（Safari）</h3>
+  <ol>
+    <li>Safariでアプリの URL を開く</li>
+    <li>画面下の <b>共有ボタン（□に↑）</b>をタップ</li>
+    <li><b>「ホーム画面に追加」</b>を選ぶ → 追加</li>
+    <li>ホーム画面に緑の本のアイコンが増えたら完了</li>
+  </ol>
+  <h3>Android（Chrome）</h3>
+  <ol>
+    <li>Chromeでアプリの URL を開く</li>
+    <li>右上の <b>⋮ メニュー</b> → <b>「ホーム画面に追加」</b>（または「アプリをインストール」）</li>
+  </ol>
+</section>
+
+<section>
+  <h2>4. 初期設定（1分）</h2>
+  <ol>
+    <li>アプリを起動 → 下の <b>⚙️ 設定</b> タブ</li>
+    <li>一番上の欄に <b>KeepaのAPIキー</b> を貼り付け</li>
+    <li>一番下の <b>「設定を保存」</b> をタップ</li>
+  </ol>
+  <div class="box">キーはあなたのスマホの中だけに保存されます。外部に送信されることはありません。</div>
+  <p>手数料・判定基準はそのままでOK（経験者の実績から作った初期値が入っています）。慣れてきたら自分好みに変えられます。</p>
+
+  <h3>（任意）過去仕入れリストの照合</h3>
+  <p>自分の仕入れ履歴CSVを読み込んでおくと、判定した本を過去に仕入れたことがある場合、<b>「📋 過去仕入れ実績あり: ◯年◯月に¥◯で仕入れ→¥◯で出品」</b>という情報が判定結果に表示されます。「前に扱ったことがある本か」「当時と相場がどう変わったか」が一目でわかります。</p>
+  <ol>
+    <li>せど楽などから仕入れリストをCSVでエクスポート（<code>SKU, JAN, ASIN, タイトル, …, 仕入原価, …, 出品予定価格, …, 仕入日</code> の列を含む形式）</li>
+    <li>そのCSVファイルをスマホに保存（LINEやメールで自分に送る→ファイルに保存、が簡単）</li>
+    <li>アプリの ⚙️設定 →「過去仕入れリスト照合」→ <b>ファイルを選択</b> でCSVを指定</li>
+    <li>「✅ ◯件を読み込みました」と出たら完了</li>
+  </ol>
+  <div class="box">リストのデータもスマホの中だけに保存され、外部には送信されません。リストを更新したいときは、新しいCSVを同じ手順で読み込み直すだけです（上書きされます）。</div>
+  <div class="box warn">⚠ 表示される過去実績は「当時の記録」です。相場は変わっているので、判定そのものは常に現在のKeepaデータで行われます。仕入れ履歴がない人・せど楽を使っていない人は、この設定は飛ばしてOKです。</div>
+</section>
+
+<section>
+  <h2>5. 使い方</h2>
+  <ol>
+    <li>店で気になる本を見つけたら、<b>🔍 判定</b> タブで <b>「📷 バーコードをスキャン」</b>（初回はカメラの許可を求められるので「許可」）</li>
+    <li>本の裏の <b>上のバーコード（978で始まる方）</b> にかざす → 自動で判定開始</li>
+    <li>値札があれば <b>仕入値</b> に入力してから判定すると、粗利まで計算されます。<b>空欄なら「いくら以下なら買っていいか」（損益分岐）</b>を出してくれます</li>
+  </ol>
+  <p>カメラが使いにくい場合は、ASIN（10桁）かJAN（13桁の数字）を手入力でもOKです。</p>
+</section>
+
+<section>
+  <h2>6. 判定の見方</h2>
+  <table>
+    <tr><th><span class="badge b-ok">✅ 仕入れOK</span></th><td>基準クリア。理由欄の粗利・利益率を確認して仕入れ</td></tr>
+    <tr><th><span class="badge b-warn">⚠️ 条件付きOK</span></th><td>チャンスだが注意点あり。<b>理由を必ず読む</b>（例：回転が遅い＝売れるまで時間がかかる／出品ゼロのプレミア候補／基準まであと僅か…）</td></tr>
+    <tr><th><span class="badge b-ng">❌ 見送り</span></th><td>基準未達。ただし絶対ダメではなく「経験者の型から外れる」の意味。自信のある根拠があれば自己判断で</td></tr>
+  </table>
+  <h3>データ項目のかんたん解説</h3>
+  <table>
+    <tr><th>中古相場</th><td>いま出ている中古（状態:良い・送料込）の最安値＝あなたの売価の目安</td></tr>
+    <tr><th>現在ランキング</th><td>小さいほど売れている本。〜30万位:よく動く / 〜90万位:普通 / 90万位〜:遅い</td></tr>
+    <tr><th>推定販売数（90日）</th><td>直近90日で売れたと推定される回数。0なら要注意</td></tr>
+    <tr><th>実売の痕跡</th><td>過去に「実際に売れた」証拠の回数。出品価格の記録だけでは売れた証拠にならない、が本アプリの思想です</td></tr>
+    <tr><th>損益分岐仕入値</th><td><b>この金額以下で仕入れられるなら基準クリア</b>。値札と見比べる</td></tr>
+    <tr><th>Amazon本体</th><td>「あり」ならAmazon自身が新品を売っている＝中古の値段の上限になる</td></tr>
+  </table>
+  <p>判定に迷ったら <b>「📈 Keepaでグラフを見る」</b> ボタンで元データを自分の目で確認できます。</p>
+</section>
+
+<section>
+  <h2>7. うまく動かないとき</h2>
+  <table>
+    <tr><th>「APIキーを入力してください」</th><td>設定タブでキーを貼って「設定を保存」を押したか確認</td></tr>
+    <tr><th>「Keepaエラー」が出る</th><td>キーの貼り間違い（前後の空白に注意）か、トークン切れ。少し待つと回復します</td></tr>
+    <tr><th>カメラが起動しない</th><td>スマホの設定でブラウザのカメラ許可を確認。手入力でも判定できます</td></tr>
+    <tr><th>商品が見つからない</th><td>バーコードの下段（192…）を読んでいないか確認。上段（978…）を読む</td></tr>
+    <tr><th>表示が古い気がする</th><td>アプリを完全に閉じて、2回開き直すと最新版になります</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>8. フィードバックのお願い 🙏</h2>
+  <p>テストで一番知りたいのは<b>「判定と、あなたの感覚がズレた場面」</b>です。</p>
+  <ul>
+    <li>「これOKでしょ」と思ったのに見送りになった本</li>
+    <li>「これはダメでしょ」と思ったのにOKになった本</li>
+    <li>意味がわからなかった表示・文言</li>
+    <li>操作でイラッとしたところ</li>
+  </ul>
+  <div class="box">報告するときは <b>①判定画面のスクショ ②本のASINかJAN ③あなたならどう判断するか</b> の3点セットだと最高です。判定履歴は 🕐履歴 タブにも残っています。</div>
+</section>
+
+<section>
+  <h2>9. 注意事項</h2>
+  <ul>
+    <li>判定は過去データに基づく<b>参考情報</b>です。仕入れの最終判断と結果責任はご自身にあります</li>
+    <li>相場は常に変動します。特に高額品は判定後にKeepaグラフの目視確認を推奨します</li>
+    <li>テスト版のため、予告なく機能が変わることがあります</li>
+    <li>アプリのURL・この取説の無断転載や再配布はご遠慮ください</li>
+  </ul>
+</section>
+
+<footer>仕入れ判定チェッカー テスター向けガイド v1.0</footer>
+</main>
+</body>
+</html>

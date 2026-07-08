@@ -205,7 +205,18 @@ function parseProduct(p){
   const v = i => (cur[i] !== undefined && cur[i] !== -1) ? cur[i] : null;
   // 売価: 中古「良い」(送料込) -> 中古最安 -> カート -> 新品
   const usedGood = v(21), usedAny = v(2), buybox = v(18), newP = v(1);
-  const price = usedGood ?? usedAny ?? buybox ?? newP;
+  let price = usedGood ?? usedAny ?? buybox ?? newP;
+  // コレクター出品（中古とは別枠。プレミア本では実質的なライバル）
+  const colPrice = v(5), countCol = v(14) ?? 0;
+  // 中古出品ゼロの場合: コレクター最安 -> 90日平均中古価格 を参考相場に
+  let noUsedStock = false;
+  if(usedGood === null && usedAny === null){
+    noUsedStock = true;
+    const avg = (p.stats && p.stats.avg90) || [];
+    const a = i => (avg[i] !== undefined && avg[i] !== -1) ? avg[i] : null;
+    const ref = colPrice ?? a(21) ?? a(2);
+    if(ref !== null) price = ref; else noUsedStock = (price !== null);
+  }
   const rank = v(3);
   const drops30 = p.stats ? (p.stats.salesRankDrops30 ?? 0) : 0;
   const drops90 = p.stats ? (p.stats.salesRankDrops90 ?? 0) : 0;
@@ -217,6 +228,7 @@ function parseProduct(p){
     countUsed: v(12) ?? 0,
     countNew: v(11) ?? 0,
     amazonStock: v(0) !== null,
+    noUsedStock, colPrice, countCol,
     drops30, drops90,
     monthlySales: Math.round(drops90 / 3 * 10) / 10
   };
@@ -234,8 +246,17 @@ function judge(d, cost, cfg){
   const reasons = [];
   let level = "ok"; // ok / warn / ng
 
-  if(d.price === null) return { level: "ng", reasons: ["中古の出品価格が取得できません（出品ゼロの可能性）。相場が読めないため見送り推奨"], fees, needGross: null, breakeven: null };
+  if(d.price === null) return { level: "ng", reasons: ["価格データが一切取得できません（出品・販売実績なし）。相場が読めないため見送り推奨"], fees: null, needGross: null, breakeven: null };
   if(d.rank === null) reasons.push("⚠ ランキングなし（売れた実績が極端に少ない本）。長期在庫リスク大");
+  if(d.noUsedStock){
+    if(d.countCol > 0 && d.colPrice !== null){
+      reasons.push(`📀 中古出品はゼロですが、コレクター出品${d.countCol}人（最安${yen(d.colPrice)}）が実質ライバル。この価格を意識した値付けが必要${d.drops90 > 0 ? `（直近90日で${d.drops90}回売れています）` : ""}`);
+    } else if(d.drops90 > 0){
+      reasons.push(`🎯 現在、中古・コレクターとも出品ゼロ＝ライバル不在！ 直近90日で${d.drops90}回売れており、90日平均相場${yen(d.price)}を基準に自分で売価を決められるチャンス`);
+    } else {
+      reasons.push(`⚠ 出品ゼロかつ直近90日の販売実績なし。参考相場${yen(d.price)}で仮計算していますが、需要自体が薄い可能性`);
+    }
+  }
 
   const rank = d.rank ?? Infinity;
   if(rank > cfg.rankHard * 10000){
@@ -292,6 +313,7 @@ function judge(d, cost, cfg){
     }
     if(d.amazonStock) reasons.push("⚠ Amazon本体が新品を販売中 — 新品価格が中古相場の上限になります");
     if(d.countUsed >= 20) reasons.push(`⚠ 中古出品者${d.countUsed}人と多め。価格競争で値下がりリスク`);
+    if(d.noUsedStock && level === "ok") level = "warn"; // 参考相場ベースなので条件付き扱い
   }
   return { level, reasons, fees, needGross, breakeven, gross, rate, band: band.label, usedException };
 }
@@ -378,10 +400,11 @@ function renderResult(d, j, cost, inputCode){
     <ul class="reasons">${j.reasons.map(r => `<li>${r}</li>`).join("")}</ul>
   </div>
   <div class="card"><table class="data">
-    <tr><td>中古相場（良い・送料込）</td><td>${d.price !== null ? yen(d.price) : "—"}</td></tr>
+    <tr><td>${d.noUsedStock ? "参考相場（90日平均・出品ゼロ）" : "中古相場（良い・送料込）"}</td><td>${d.price !== null ? yen(d.price) : "—"}</td></tr>
     <tr><td>現在ランキング</td><td>${d.rank !== null ? d.rank.toLocaleString() + " 位" : "—"}</td></tr>
     <tr><td>推定販売数（90日）</td><td>${d.drops90} 回（月${d.monthlySales}）</td></tr>
     <tr><td>中古出品者数</td><td>${d.countUsed} 人</td></tr>
+    ${d.countCol > 0 ? `<tr><td>コレクター出品</td><td>${d.countCol} 人${d.colPrice !== null ? "（最安" + yen(d.colPrice) + "）" : ""}</td></tr>` : ""}
     <tr><td>Amazon本体</td><td>${d.amazonStock ? "あり ⚠" : "なし"}</td></tr>
     <tr><td>想定手数料（FBA）</td><td>${yen(j.fees)}</td></tr>`;
   if(cost !== null && j.gross !== null) html += `<tr><td>粗利 / 利益率</td><td>${yen(j.gross)} / ${j.rate.toFixed(0)}%</td></tr>`;

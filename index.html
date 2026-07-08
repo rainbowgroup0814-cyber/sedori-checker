@@ -101,11 +101,11 @@
   </div>
   <div class="card">
     <h3>判定基準（ランク別）</h3>
-    <div class="note" style="margin:0 0 8px">2年半・2.4万件の実仕入れデータから逆算した基準が初期値です。</div>
-    <div class="row"><div><label>〜15万位: 最低粗利 ¥</label><input type="number" id="c1-gross" value="300"></div><div><label>最低利益率 %</label><input type="number" id="c1-rate" value="0"></div></div>
-    <div class="row"><div><label>〜30万位: 最低粗利 ¥</label><input type="number" id="c2-gross" value="800"></div><div><label>最低利益率 %</label><input type="number" id="c2-rate" value="20"></div></div>
-    <div class="row"><div><label>〜90万位: 最低粗利 ¥</label><input type="number" id="c3-gross" value="1200"></div><div><label>最低利益率 %</label><input type="number" id="c3-rate" value="30"></div></div>
-    <div class="row"><div><label>90万位〜: 最低粗利 ¥</label><input type="number" id="c4-gross" value="2000"></div><div><label>最低利益率 %</label><input type="number" id="c4-rate" value="40"></div></div>
+    <div class="note" style="margin:0 0 8px">2年半・2.4万件の実仕入れデータの下位10%ライン（実際に許容してきた床）が初期値です。厳しめにしたい人は数値を上げてください。</div>
+    <div class="row"><div><label>〜15万位: 最低粗利 ¥</label><input type="number" id="c1-gross" value="300"></div><div><label>最低利益率 %</label><input type="number" id="c1-rate" value="15"></div></div>
+    <div class="row"><div><label>〜30万位: 最低粗利 ¥</label><input type="number" id="c2-gross" value="550"></div><div><label>最低利益率 %</label><input type="number" id="c2-rate" value="17"></div></div>
+    <div class="row"><div><label>〜90万位: 最低粗利 ¥</label><input type="number" id="c3-gross" value="650"></div><div><label>最低利益率 %</label><input type="number" id="c3-rate" value="18"></div></div>
+    <div class="row"><div><label>90万位〜: 最低粗利 ¥</label><input type="number" id="c4-gross" value="1000"></div><div><label>最低利益率 %</label><input type="number" id="c4-rate" value="25"></div></div>
     <label>これ以上のランクは自動NG（万位）</label><input type="number" id="rank-hard" value="250">
     <div class="note">例外ルール（自動適用）: ①売価1万円以上＆30万位以内なら利益率10%＋粗利¥1,500でOK ②90万位超は「絶版プレミア枠」として長期在庫の注意付きでOK判定</div>
   </div>
@@ -281,7 +281,11 @@ function judge(d, cost, cfg){
 
   // 判定
   if(cost !== null){
-    if(gross < needGross){
+    if(gross < needGross && gross >= needGross * 0.9){
+      // 僅差ゾーン: 基準の90%以上に届いていれば機械的に切らない
+      level = "warn";
+      reasons.unshift(`粗利${yen(gross)}（利益率${rate.toFixed(0)}%）— ${band.label}の基準まで残り${yen(needGross - gross)}の僅差。本の状態・回転を見て自分で判断を`);
+    } else if(gross < needGross){
       level = "ng";
       reasons.unshift(`粗利${yen(gross)}（利益率${rate.toFixed(0)}%）— ${band.label}の基準（粗利${yen(needGross)}以上）に届きません`);
       if(breakeven > 0) reasons.push(`仕入値が${yen(breakeven)}以下なら基準クリア`);
@@ -415,6 +419,9 @@ function renderResult(d, j, cost, inputCode){
     <a href="https://keepa.com/#!product/5-${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#37474f; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">📈 Keepaでグラフを見る</a>
     <a href="https://www.amazon.co.jp/dp/${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#e88b00; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">🛒 Amazonで見る</a>
   </div>`;
+  if(j.level === "ng"){
+    html += `<div class="note" style="background:#faf3f2; border-radius:8px; padding:10px 12px;">💡 <b>「見送り」の意味</b>：この判定は経験者2.4万件の実績から引いた「型」による足切りで、絶対の不可ではありません。実績の約1割はこのラインの下でも利益を出しています。ツールには見えないもの（本の状態、絶版・メディア化の兆し、セット需要など）に自分なりの根拠があるなら、それを優先して構いません。迷ったら「Keepaでグラフを見る」で波形を確認するのがおすすめです。</div>`;
+  }
   html += `<div class="note">※判定は過去実績から逆算した基準による参考情報です。最終判断はご自身で。相場は変動します。</div></div>`;
   $("result").innerHTML = html;
 }

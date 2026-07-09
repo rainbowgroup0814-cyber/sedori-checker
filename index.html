@@ -77,6 +77,15 @@
     <div id="video-wrap"><video id="video" playsinline muted autoplay></video><div id="scan-line"></div></div>
     <label>仕入値（円・空欄なら損益分岐を計算）</label>
     <input type="number" id="cost" inputmode="numeric" placeholder="例: 800">
+    <div id="discount-row" style="display:flex; gap:5px; margin-top:8px;">
+      <button class="btn-sub disc" data-off="0" style="flex:1; padding:9px 0; font-size:12px;">値札</button>
+      <button class="btn-sub disc" data-off="5" style="flex:1; padding:9px 0; font-size:12px;">5%</button>
+      <button class="btn-sub disc" data-off="10" style="flex:1; padding:9px 0; font-size:12px;">10%</button>
+      <button class="btn-sub disc" data-off="20" style="flex:1; padding:9px 0; font-size:12px;">20%</button>
+      <button class="btn-sub disc" data-off="30" style="flex:1; padding:9px 0; font-size:12px;">30%</button>
+      <button class="btn-sub disc" data-off="50" style="flex:1; padding:9px 0; font-size:12px;">50%</button>
+    </div>
+    <div class="note" id="disc-note" style="margin-top:4px;"></div>
     <button class="btn-main" id="btn-check">判定する</button>
     <div class="err" id="check-err"></div>
     <div class="tokens" id="tokens"></div>
@@ -221,7 +230,7 @@ function parseProduct(p){
   const v = i => (cur[i] !== undefined && cur[i] !== -1) ? cur[i] : null;
   // ライブ出品一覧（offers）から状態別の現在最安を集計 — 状態別の正確な価格はここからしか取れない
   // condition: 1=新品 2=ほぼ新品 3=非常に良い 4=良い 5=可 7-10=コレクター
-  let ofGood = null, ofAcc = null, ofUpper = null, ofCol = null, nUsedLive = 0, nColLive = 0;
+  let ofGood = null, ofAcc = null, ofUpper = null, ofCol = null, nUsedLive = 0, nColLive = 0, nNewLive = 0, nNewFbaLive = 0;
   const offersChecked = !!(p.offers && p.offers.length);
   if(offersChecked){
     // liveOffersOrderがあればライブ出品のみ、無ければ全offers（only-live-offers=1指定なので基本ライブのみ）
@@ -238,6 +247,7 @@ function parseProduct(p){
       else if(c === 5){ nUsedLive++; if(ofAcc === null || total < ofAcc) ofAcc = total; }
       else if(c === 2 || c === 3){ nUsedLive++; if(ofUpper === null || total < ofUpper) ofUpper = total; }
       else if(c >= 7 && c <= 10){ nColLive++; if(ofCol === null || total < ofCol) ofCol = total; }
+      else if(c === 1 && !o.isAmazon){ nNewLive++; if(o.isFBA) nNewFbaLive++; }
     }
   }
   // 売価の基準:
@@ -329,6 +339,7 @@ function parseProduct(p){
     amazonStock: v(0) !== null,
     amazonPrice: v(0),
     noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc, offersChecked,
+    newLiveCount: nNewLive, newLiveFBA: nNewFbaLive,
     drops30, drops90,
     monthlySales: Math.round(drops90 / 3 * 10) / 10
   };
@@ -368,6 +379,18 @@ function judge(d, cost, cfg){
     } else {
       reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中。中古相場${yen(d.price)}は新品より安いためそのまま判定します`);
     }
+  }
+
+  // Amazon以外の新品出品ルール: 無在庫販売の可能性があるため出荷日数の確認を促す
+  if(!d.amazonStock && d.newP !== null && d.price !== null && d.price >= d.newP - 500 && d.countNew > 0){
+    if(d.offersChecked && d.newLiveCount > 0 && d.newLiveFBA > 0){
+      reasons.push(`🆕 Amazon以外の新品出品にFBA（即納）が${d.newLiveFBA}件あります（新品最安${yen(d.newP)}）。即納の新品がいる場合、新品価格が中古売価の実質上限になります`);
+    } else if(d.offersChecked && d.newLiveCount > 0){
+      reasons.push(`🆕 Amazon以外の新品出品あり（最安${yen(d.newP)}・自己発送のみ）＝<b>無在庫販売の可能性</b>。出荷日数が「取り寄せ」なら新品価格は壁にならず、中古が新品より高くても売れる可能性があります。商品ページで出荷日数を要確認`);
+    } else {
+      reasons.push(`🆕 Amazon以外の新品出品あり（最安${yen(d.newP)}）。中古売価がこれに近いため<b>要確認</b>：出品者の出荷日数を見てください。「取り寄せ」表示なら無在庫販売＝新品価格は壁にならず、新品より高くても売れる可能性あり。即納なら新品価格が上限です`);
+    }
+    if(level === "ok") level = "warn"; // 要確認として条件付き扱い
   }
 
   const fees = d.price * cfg.feePct / 100 + cfg.feeClose + cfg.feeFba;
@@ -587,6 +610,8 @@ function renderResult(d, j, cost, inputCode, showPrecisionBtn){
   let html = `<div class="verdict ${V[1]}">
     <h2>${V[0]}</h2>
     <div class="title">${d.title}</div>
+    ${d.amazonStock ? `<div style="background:#fff3e0; border:2px solid #e88b00; color:#a35400; border-radius:10px; padding:9px 12px; margin:6px 0 10px; font-weight:700; font-size:15px;">🅰 Amazon本体が新品${d.amazonPrice !== null ? " " + yen(d.amazonPrice) : ""}で販売中！<span style="font-weight:400; font-size:13px;"><br>中古は本体より安くないと売れません（回転の早い本のみ対象）</span></div>` : ""}
+    ${!d.amazonStock && d.newP !== null && d.price !== null && d.price >= d.newP - 500 && d.countNew > 0 ? `<div style="background:#fffbe6; border:2px solid #c9a227; color:#7a5f00; border-radius:10px; padding:9px 12px; margin:6px 0 10px; font-weight:700; font-size:15px;">🆕 Amazon以外の新品 最安${yen(d.newP)} あり — 出荷日数を要確認<span style="font-weight:400; font-size:13px;"><br>取り寄せ表示なら無在庫販売＝新品より高くても売れる可能性あり</span></div>` : ""}
     <ul class="reasons">${j.reasons.map(r => `<li>${r}</li>`).join("")}</ul>
   </div>
   <div class="card"><table class="data">
@@ -600,6 +625,7 @@ function renderResult(d, j, cost, inputCode, showPrecisionBtn){
     <tr><td>中古出品者数</td><td>${d.countUsed} 人</td></tr>
     ${d.countCol > 0 ? `<tr><td>コレクター出品</td><td>${d.countCol} 人${d.colPrice !== null ? "（最安" + yen(d.colPrice) + "）" : ""}</td></tr>` : ""}
     <tr><td>Amazon本体</td><td>${d.amazonStock ? "あり ⚠" : "なし"}</td></tr>
+    ${d.newP !== null && d.countNew > 0 ? `<tr><td>新品最安（3P含む）</td><td>${yen(d.newP)}（${d.countNew}人）</td></tr>` : ""}
     <tr><td>想定手数料（FBA）</td><td>${yen(j.fees)}</td></tr>`;
   if(cost !== null && j.gross !== null) html += `<tr><td>粗利 / 利益率</td><td>${yen(j.gross)} / ${j.rate.toFixed(0)}%</td></tr>`;
   if(cost !== null && j.minPrice !== null) html += `<tr><td>必要販売価格（基準クリア）</td><td>${yen(j.minPrice)} 以上</td></tr>`;
@@ -694,6 +720,44 @@ function stopScan(){
   $("video-wrap").style.display = "none";
   $("btn-scan").textContent = "📷 バーコードをスキャン";
 }
+
+/* ---------- 割引ボタン（セール日の値札→仕入値変換） ---------- */
+let baseCost = null; // 値札価格（割引前）
+$("cost").addEventListener("input", () => {
+  baseCost = Number($("cost").value) || null;
+  $("disc-note").textContent = "";
+  document.querySelectorAll(".disc").forEach(x => x.style.background = "");
+});
+document.querySelectorAll(".disc").forEach(b => b.onclick = () => {
+  if(baseCost === null) baseCost = Number($("cost").value) || null;
+  if(baseCost === null) return;
+  const off = Number(b.dataset.off);
+  $("cost").value = Math.round(baseCost * (100 - off) / 100);
+  $("disc-note").textContent = off === 0 ? "" : `値札${yen(baseCost)} の ${off}%オフ → ${yen(Number($("cost").value))}`;
+  document.querySelectorAll(".disc").forEach(x => x.style.background = "");
+  b.style.background = "#cfe8dd";
+});
+
+/* ---------- 外付けバーコードリーダー連携（Bluetooth HID: キーボードとして高速入力される） ---------- */
+let hidBuf = "", hidLast = 0;
+document.addEventListener("keydown", e => {
+  const t = e.target;
+  if(t && (t.id === "code" || t.id === "cost")){
+    if(e.key === "Enter"){ e.preventDefault(); runCheck(false); }
+    return;
+  }
+  if(t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+  const now = Date.now();
+  if(now - hidLast > 300) hidBuf = ""; // 手入力(遅い)は無視、リーダー(速い)だけ拾う
+  hidLast = now;
+  if(/^\d$/.test(e.key)){ hidBuf += e.key; }
+  else if(e.key === "Enter" && hidBuf.length >= 10){
+    $("code").value = hidBuf;
+    hidBuf = "";
+    if(navigator.vibrate) navigator.vibrate(80);
+    runCheck(false);
+  } else if(e.key !== "Shift"){ hidBuf = ""; }
+});
 
 /* ---------- Service Worker ---------- */
 if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

@@ -360,7 +360,8 @@ function judge(d, cost, cfg){
   if(d.price === null) return { level: "ng", reasons: ["価格データが一切取得できません（出品・販売実績なし）。相場が読めないため見送り推奨"], fees: null, needGross: null, breakeven: null, minPrice: null };
 
   // Amazon本体ルール: 本体が新品を販売中なら、中古の実質売価上限は「Amazon価格−500円」。
-  // かつ、その条件で買っていいのは回転が早い本（15万位以内 or 推定月販3冊以上）だけ
+  // 回転が早い本（15万位以内 or 推定月販3冊以上）は通常判定、回転が遅い本はプレミア級の利幅がある場合のみ条件付き
+  let amazonSlow = false;
   if(d.amazonStock && d.amazonPrice !== null){
     const cap = d.amazonPrice - 500;
     if(cap <= 0){
@@ -368,10 +369,8 @@ function judge(d, cost, cfg){
     }
     const fast = (d.rank !== null && d.rank <= 150000) || d.monthlySales >= 3;
     if(!fast){
-      return { level: "ng", reasons: [
-        `🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中。本体がいる商品は「本体より¥500以上安く・かつ回転が早い」本しか売れません`,
-        `この本は${d.rank !== null ? "ランキング" + Math.round(d.rank/10000) + "万位" : "ランキングなし"}・推定月販${d.monthlySales}冊で回転条件（15万位以内 or 月販3冊以上）を満たさないため見送り`
-      ], fees: null, needGross: null, breakeven: null, minPrice: null };
+      amazonSlow = true;
+      reasons.push(`⚠ Amazon本体がいて回転も遅い（${d.rank !== null ? "ランキング" + Math.round(d.rank/10000) + "万位" : "ランキングなし"}・推定月販${d.monthlySales}冊）— 通常は見送り。<b>プレミア級の利幅（粗利${yen(cfg.c4g)}以上かつ利益率${cfg.c4r}%以上）が取れる場合のみ</b>条件付きで検討します`);
     }
     if(d.price > d.amazonPrice){
       reasons.push(`🏷 中古相場${yen(d.price)}がAmazon新品${yen(d.amazonPrice)}より高いため、判定売価を「Amazon新品−¥500」＝${yen(cap)}に補正して計算しています`);
@@ -424,6 +423,11 @@ function judge(d, cost, cfg){
     const exGross = Math.max(1500, d.price * 0.10);
     if(exGross < needGross){ needGross = exGross; usedException = "高単価・高回転の例外基準（利益率10%・粗利¥1,500〜）を適用"; }
   }
+  // Amazon本体あり＆回転遅い → プレミア級の利幅（90万位〜の基準）を最低ラインとして要求
+  if(amazonSlow){
+    needGross = Math.max(needGross, cfg.c4g, d.price * cfg.c4r / 100);
+    usedException = null;
+  }
 
   const breakeven = d.price - fees - needGross; // この仕入値以下ならOK
   let gross = null, rate = null, minPrice = null;
@@ -431,8 +435,10 @@ function judge(d, cost, cfg){
     gross = d.price - fees - cost;
     rate = gross / d.price * 100;
     // 必要販売価格: この仕入値で基準（粗利額と利益率の両方）を満たす最低売価
-    const f = cfg.feePct / 100, c0 = cfg.feeClose + cfg.feeFba, r = band.rate / 100;
-    const p1 = (band.gross + c0 + cost) / (1 - f);
+    const gEff = amazonSlow ? Math.max(band.gross, cfg.c4g) : band.gross;
+    const rEff = amazonSlow ? Math.max(band.rate, cfg.c4r) : band.rate;
+    const f = cfg.feePct / 100, c0 = cfg.feeClose + cfg.feeFba, r = rEff / 100;
+    const p1 = (gEff + c0 + cost) / (1 - f);
     const p2 = (1 - f - r) > 0 ? (c0 + cost) / (1 - f - r) : Infinity;
     minPrice = isFinite(Math.max(p1, p2)) ? Math.ceil(Math.max(p1, p2)) : null;
   }
@@ -477,6 +483,10 @@ function judge(d, cost, cfg){
       reasons.push(`推定販売ペースは月${d.monthlySales}冊と遅め`);
     }
     if(d.countUsed >= 20) reasons.push(`⚠ 中古出品者${d.countUsed}人と多め。価格競争で値下がりリスク`);
+    if(amazonSlow && level !== "ng"){
+      level = "warn";
+      reasons.push("⚠ Amazon本体の在庫復活・値下げで相場が崩れるリスクあり。売り切るまで長期戦の覚悟を");
+    }
     if(d.noUsedStock && level === "ok") level = "warn"; // 参考相場ベースなので条件付き扱い
     if(!d.noUsedStock && d.offersChecked && d.priceCond && !d.priceCond.startsWith("良い")){
       reasons.push(`⚠ 状態「良い」の出品がありません。相場は「${d.priceCond}」を基準にしています。「良い」で出品すれば一段高く売れる可能性あり`);

@@ -193,7 +193,7 @@ async function keepaLookup(input){
   } else {
     throw new Error("ASIN(10桁)かJAN(13桁)を入力してください");
   }
-  const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1&${idParam}`;
+  const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1&offers=20&only-live-offers=1&${idParam}`;
   let res;
   try { res = await fetch(url); }
   catch(e){ throw new Error("Keepa APIに接続できませんでした。電波状況を確認してください。"); }
@@ -209,20 +209,41 @@ const KEEPA_EPOCH_MIN = 21564000;
 function parseProduct(p){
   const cur = (p.stats && p.stats.current) || [];
   const v = i => (cur[i] !== undefined && cur[i] !== -1) ? cur[i] : null;
+  // ライブ出品一覧（offers）から状態別の現在最安を集計 — 状態別の正確な価格はここからしか取れない
+  // condition: 1=新品 2=ほぼ新品 3=非常に良い 4=良い 5=可 7-10=コレクター
+  let ofGood = null, ofAcc = null, ofUpper = null, ofCol = null, nUsedLive = 0, nColLive = 0;
+  if(p.offers && p.offers.length){
+    // liveOffersOrderがあればライブ出品のみ、無ければ全offers（only-live-offers=1指定なので基本ライブのみ）
+    const liveOffers = (p.liveOffersOrder && p.liveOffersOrder.length)
+      ? p.liveOffersOrder.map(i => p.offers[i])
+      : p.offers;
+    for(const o of liveOffers){
+      if(!o || !o.offerCSV || o.offerCSV.length < 3) continue;
+      const L = o.offerCSV.length;
+      const pr = o.offerCSV[L - 2], sh = Math.max(0, o.offerCSV[L - 1]);
+      if(pr <= 0) continue;
+      const total = pr + sh, c = o.condition;
+      if(c === 4){ nUsedLive++; if(ofGood === null || total < ofGood) ofGood = total; }
+      else if(c === 5){ nUsedLive++; if(ofAcc === null || total < ofAcc) ofAcc = total; }
+      else if(c === 2 || c === 3){ nUsedLive++; if(ofUpper === null || total < ofUpper) ofUpper = total; }
+      else if(c >= 7 && c <= 10){ nColLive++; if(ofCol === null || total < ofCol) ofCol = total; }
+    }
+  }
   // 売価: 「状態・良い」の現在価格が基準。無ければ現在の他状態へフォールバック（過去データには落ちない）
-  const usedLN = v(19), usedVG = v(20), usedGood = v(21), usedAcc = v(22);
+  const usedGood = ofGood ?? v(21);
+  const usedUpper = ofUpper ?? v(20) ?? v(19);
+  const usedAcc = ofAcc ?? v(22);
   const usedAny = v(2), buybox = v(18), newP = v(1);
   const avg = (p.stats && p.stats.avg90) || [];
   const a = i => (avg[i] !== undefined && avg[i] !== -1) ? avg[i] : null;
   let price = null, priceCond = "";
   if(usedGood !== null){ price = usedGood; priceCond = "良い・送料込"; }
-  else if(usedVG !== null){ price = usedVG; priceCond = "非常に良い・送料込"; }
-  else if(usedLN !== null){ price = usedLN; priceCond = "ほぼ新品・送料込"; }
+  else if(usedUpper !== null){ price = usedUpper; priceCond = "非常に良い以上・送料込"; }
   else if(usedAcc !== null){ price = usedAcc; priceCond = "可・送料込"; }
   else if(usedAny !== null){ price = usedAny; priceCond = "中古最安・状態不問"; }
   else { price = buybox ?? newP; if(price !== null) priceCond = "カート/新品"; }
   // コレクター出品（中古とは別枠。プレミア本では実質的なライバル）
-  const colPrice = v(5), countCol = v(14) ?? 0;
+  const colPrice = ofCol ?? v(5), countCol = nColLive > 0 ? nColLive : (v(14) ?? 0);
   // 全期間履歴のスキャン（中古＋コレクター）: 「供給が絶えて売れてないように見える」プレミア本の検出用
   const kdate = t => { const dt = new Date((t + KEEPA_EPOCH_MIN) * 60000); return dt.getFullYear() + "/" + (dt.getMonth() + 1); };
   function histScan(arr){
@@ -272,7 +293,7 @@ function parseProduct(p){
   const sold = salesEv.length ? { count: salesEv.length, last: { price: salesEv[salesEv.length-1].price, date: kdate(salesEv[salesEv.length-1].t) } } : null;
   // 中古出品ゼロの場合: コレクター最安 -> 90日平均 -> 全期間履歴（実売価格 or 最安記録） を参考相場に
   let noUsedStock = false, histOnly = false;
-  const hasUsed = [usedLN, usedVG, usedGood, usedAcc, usedAny].some(x => x !== null);
+  const hasUsed = [usedUpper, usedGood, usedAcc, usedAny].some(x => x !== null);
   if(!hasUsed){
     noUsedStock = true;
     let ref = colPrice ?? a(21) ?? a(2);
@@ -287,7 +308,7 @@ function parseProduct(p){
     title: p.title || "(タイトル不明)",
     price, usedAny, newP,
     rank,
-    countUsed: v(12) ?? 0,
+    countUsed: v(12) ?? nUsedLive,
     countNew: v(11) ?? 0,
     amazonStock: v(0) !== null,
     noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc,

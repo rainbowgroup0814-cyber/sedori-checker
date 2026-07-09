@@ -209,9 +209,18 @@ const KEEPA_EPOCH_MIN = 21564000;
 function parseProduct(p){
   const cur = (p.stats && p.stats.current) || [];
   const v = i => (cur[i] !== undefined && cur[i] !== -1) ? cur[i] : null;
-  // 売価: 中古「良い」(送料込) -> 中古最安 -> カート -> 新品
-  const usedGood = v(21), usedAny = v(2), buybox = v(18), newP = v(1);
-  let price = usedGood ?? usedAny ?? buybox ?? newP;
+  // 売価: 「状態・良い」の現在価格が基準。無ければ現在の他状態へフォールバック（過去データには落ちない）
+  const usedLN = v(19), usedVG = v(20), usedGood = v(21), usedAcc = v(22);
+  const usedAny = v(2), buybox = v(18), newP = v(1);
+  const avg = (p.stats && p.stats.avg90) || [];
+  const a = i => (avg[i] !== undefined && avg[i] !== -1) ? avg[i] : null;
+  let price = null, priceCond = "";
+  if(usedGood !== null){ price = usedGood; priceCond = "良い・送料込"; }
+  else if(usedVG !== null){ price = usedVG; priceCond = "非常に良い・送料込"; }
+  else if(usedLN !== null){ price = usedLN; priceCond = "ほぼ新品・送料込"; }
+  else if(usedAcc !== null){ price = usedAcc; priceCond = "可・送料込"; }
+  else if(usedAny !== null){ price = usedAny; priceCond = "中古最安・状態不問"; }
+  else { price = buybox ?? newP; if(price !== null) priceCond = "カート/新品"; }
   // コレクター出品（中古とは別枠。プレミア本では実質的なライバル）
   const colPrice = v(5), countCol = v(14) ?? 0;
   // 全期間履歴のスキャン（中古＋コレクター）: 「供給が絶えて売れてないように見える」プレミア本の検出用
@@ -263,10 +272,9 @@ function parseProduct(p){
   const sold = salesEv.length ? { count: salesEv.length, last: { price: salesEv[salesEv.length-1].price, date: kdate(salesEv[salesEv.length-1].t) } } : null;
   // 中古出品ゼロの場合: コレクター最安 -> 90日平均 -> 全期間履歴（実売価格 or 最安記録） を参考相場に
   let noUsedStock = false, histOnly = false;
-  if(usedGood === null && usedAny === null){
+  const hasUsed = [usedLN, usedVG, usedGood, usedAcc, usedAny].some(x => x !== null);
+  if(!hasUsed){
     noUsedStock = true;
-    const avg = (p.stats && p.stats.avg90) || [];
-    const a = i => (avg[i] !== undefined && avg[i] !== -1) ? avg[i] : null;
     let ref = colPrice ?? a(21) ?? a(2);
     if(ref === null && hist){ ref = (sold ? sold.last.price : hist.min); histOnly = true; }
     if(ref !== null) price = ref; else noUsedStock = (price !== null);
@@ -282,7 +290,7 @@ function parseProduct(p){
     countUsed: v(12) ?? 0,
     countNew: v(11) ?? 0,
     amazonStock: v(0) !== null,
-    noUsedStock, colPrice, countCol, hist, histOnly, sold,
+    noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc,
     drops30, drops90,
     monthlySales: Math.round(drops90 / 3 * 10) / 10
   };
@@ -380,6 +388,13 @@ function judge(d, cost, cfg){
     if(d.amazonStock) reasons.push("⚠ Amazon本体が新品を販売中 — 新品価格が中古相場の上限になります");
     if(d.countUsed >= 20) reasons.push(`⚠ 中古出品者${d.countUsed}人と多め。価格競争で値下がりリスク`);
     if(d.noUsedStock && level === "ok") level = "warn"; // 参考相場ベースなので条件付き扱い
+    if(!d.noUsedStock && d.priceCond && !d.priceCond.startsWith("良い")){
+      reasons.push(`⚠ 状態「良い」の出品がありません。相場は「${d.priceCond}」を基準にしています。「良い」で出品すれば一段高く売れる可能性あり`);
+    }
+    const lowCond = d.usedAcc ?? d.usedAny;
+    if(!d.noUsedStock && d.priceCond.startsWith("良い") && lowCond !== null && lowCond < d.price * 0.9){
+      reasons.push(`⚠ 下位状態（可など）の最安が${yen(lowCond)}と「良い」${yen(d.price)}より大幅に安く、<b>相場が下に引っ張られるリスク</b>あり。売価はこの差を見て慎重に`);
+    }
   }
   return { level, reasons, fees, needGross, breakeven, gross, rate, band: band.label, usedException };
 }
@@ -466,7 +481,9 @@ function renderResult(d, j, cost, inputCode){
     <ul class="reasons">${j.reasons.map(r => `<li>${r}</li>`).join("")}</ul>
   </div>
   <div class="card"><table class="data">
-    <tr><td>${d.histOnly ? "参考相場（過去実績・出品ゼロ）" : d.noUsedStock ? "参考相場（90日平均・出品ゼロ）" : "中古相場（良い・送料込）"}</td><td>${d.price !== null ? yen(d.price) : "—"}</td></tr>
+    <tr><td>${d.histOnly ? "参考相場（過去実績・出品ゼロ）" : d.noUsedStock ? (d.countCol > 0 && d.colPrice !== null ? "参考相場（コレクター最安・中古ゼロ）" : "参考相場（90日平均・出品ゼロ）") : "中古相場（" + d.priceCond + "）"}</td><td>${d.price !== null ? yen(d.price) : "—"}</td></tr>
+    ${!d.noUsedStock && d.usedAcc !== null && d.priceCond !== "可・送料込" ? `<tr><td>可の最安（送料込）</td><td>${yen(d.usedAcc)}</td></tr>` : ""}
+    ${!d.noUsedStock && d.usedAcc === null && d.usedAny !== null && d.usedAny < d.price ? `<tr><td>中古最安（状態不問）</td><td>${yen(d.usedAny)}</td></tr>` : ""}
     ${d.noUsedStock && d.hist ? `<tr><td>過去の出品価格（全期間）</td><td>${yen(d.hist.min)}〜${yen(d.hist.max)}</td></tr>` : ""}
     ${d.noUsedStock && d.sold ? `<tr><td>実売の痕跡（全期間）</td><td>${d.sold.count}回・直近${yen(d.sold.last.price)}（${d.sold.last.date}）</td></tr>` : ""}
     <tr><td>現在ランキング</td><td>${d.rank !== null ? d.rank.toLocaleString() + " 位" : "—"}</td></tr>

@@ -626,10 +626,10 @@ function renderResult(d, j, cost, inputCode, showPrecisionBtn){
     ${d.countCol > 0 ? `<tr><td>コレクター出品</td><td>${d.countCol} 人${d.colPrice !== null ? "（最安" + yen(d.colPrice) + "）" : ""}</td></tr>` : ""}
     <tr><td>Amazon本体</td><td>${d.amazonStock ? "あり ⚠" : "なし"}</td></tr>
     ${d.newP !== null && d.countNew > 0 ? `<tr><td>新品最安（3P含む）</td><td>${yen(d.newP)}（${d.countNew}人）</td></tr>` : ""}
-    <tr><td>想定手数料（FBA）</td><td>${yen(j.fees)}</td></tr>`;
-  if(cost !== null && j.gross !== null) html += `<tr><td>粗利 / 利益率</td><td>${yen(j.gross)} / ${j.rate.toFixed(0)}%</td></tr>`;
-  if(cost !== null && j.minPrice !== null) html += `<tr><td>必要販売価格（基準クリア）</td><td>${yen(j.minPrice)} 以上</td></tr>`;
-  if(cost === null && j.breakeven !== null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
+    <tr><td>想定手数料（FBA）</td><td>${j.fees != null ? yen(j.fees) : "—"}</td></tr>`;
+  if(cost !== null && j.gross != null && j.rate != null) html += `<tr><td>粗利 / 利益率</td><td>${yen(j.gross)} / ${j.rate.toFixed(0)}%</td></tr>`;
+  if(cost !== null && j.minPrice != null) html += `<tr><td>必要販売価格（基準クリア）</td><td>${yen(j.minPrice)} 以上</td></tr>`;
+  if(cost === null && j.breakeven != null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
   html += `</table>`;
   if(pastRec) html += `<div class="past">📋 <b>過去仕入れ実績あり</b>: ${pastRec[0]} に ${yen(pastRec[1])} で仕入れ → ${yen(pastRec[2])} で出品${d.price !== null && pastRec[2] > 0 ? `<br>現在相場${yen(d.price)}（当時比 ${Math.round(d.price / pastRec[2] * 100)}%）` : ""}<br><span style="color:#a33">※当時と相場が変わっている可能性あり。判定は現在データ基準です</span></div>`;
   if(showPrecisionBtn){

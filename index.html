@@ -327,6 +327,7 @@ function parseProduct(p){
     countUsed: v(12) ?? nUsedLive,
     countNew: v(11) ?? 0,
     amazonStock: v(0) !== null,
+    amazonPrice: v(0),
     noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc, offersChecked,
     drops30, drops90,
     monthlySales: Math.round(drops90 / 3 * 10) / 10
@@ -335,7 +336,7 @@ function parseProduct(p){
 
 /* ---------- 判定ロジック（ひろし基準） ---------- */
 function judge(d, cost, cfg){
-  const fees = d.price * cfg.feePct / 100 + cfg.feeClose + cfg.feeFba;
+  d = Object.assign({}, d); // 売価補正用のローカルコピー（元データは変更しない）
   const bands = [
     { max: 150000,  gross: cfg.c1g, rate: cfg.c1r, label: "〜15万位（超高回転）" },
     { max: 300000,  gross: cfg.c2g, rate: cfg.c2r, label: "15〜30万位" },
@@ -345,7 +346,31 @@ function judge(d, cost, cfg){
   const reasons = [];
   let level = "ok"; // ok / warn / ng
 
-  if(d.price === null) return { level: "ng", reasons: ["価格データが一切取得できません（出品・販売実績なし）。相場が読めないため見送り推奨"], fees: null, needGross: null, breakeven: null };
+  if(d.price === null) return { level: "ng", reasons: ["価格データが一切取得できません（出品・販売実績なし）。相場が読めないため見送り推奨"], fees: null, needGross: null, breakeven: null, minPrice: null };
+
+  // Amazon本体ルール: 本体が新品を販売中なら、中古の実質売価上限は「Amazon価格−500円」。
+  // かつ、その条件で買っていいのは回転が早い本（15万位以内 or 推定月販3冊以上）だけ
+  if(d.amazonStock && d.amazonPrice !== null){
+    const cap = d.amazonPrice - 500;
+    if(cap <= 0){
+      return { level: "ng", reasons: [`Amazon本体が新品${yen(d.amazonPrice)}で販売中 — 中古で勝てる売価が残りません`], fees: null, needGross: null, breakeven: null, minPrice: null };
+    }
+    const fast = (d.rank !== null && d.rank <= 150000) || d.monthlySales >= 3;
+    if(!fast){
+      return { level: "ng", reasons: [
+        `🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中。本体がいる商品は「本体より¥500以上安く・かつ回転が早い」本しか売れません`,
+        `この本は${d.rank !== null ? "ランキング" + Math.round(d.rank/10000) + "万位" : "ランキングなし"}・推定月販${d.monthlySales}冊で回転条件（15万位以内 or 月販3冊以上）を満たさないため見送り`
+      ], fees: null, needGross: null, breakeven: null, minPrice: null };
+    }
+    if(d.price > cap){
+      reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中 → 中古の売価上限を${yen(cap)}（本体−¥500）に補正して判定しています`);
+      d.price = cap;
+    } else {
+      reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中（中古相場${yen(d.price)}はそれより安いためそのまま判定。値付けは本体−¥500を意識）`);
+    }
+  }
+
+  const fees = d.price * cfg.feePct / 100 + cfg.feeClose + cfg.feeFba;
   if(d.rank === null) reasons.push("⚠ ランキングなし — 長期間出品が無く測定できない状態。長期在庫リスクとは限りません（供給ゼロが原因のことも多い）が、需要が消えている可能性も含みます");
   if(d.noUsedStock){
     if(d.histOnly && d.hist){
@@ -428,7 +453,6 @@ function judge(d, cost, cfg){
       if(level === "ok") level = "warn";
       reasons.push(`推定販売ペースは月${d.monthlySales}冊と遅め`);
     }
-    if(d.amazonStock) reasons.push("⚠ Amazon本体が新品を販売中 — 新品価格が中古相場の上限になります");
     if(d.countUsed >= 20) reasons.push(`⚠ 中古出品者${d.countUsed}人と多め。価格競争で値下がりリスク`);
     if(d.noUsedStock && level === "ok") level = "warn"; // 参考相場ベースなので条件付き扱い
     if(!d.noUsedStock && d.offersChecked && d.priceCond && !d.priceCond.startsWith("良い")){

@@ -92,6 +92,15 @@
     <div class="note">Keepaにログイン → <b>keepa.com/#!api</b> でキーを確認できます（API付きプランの契約が必要）。キーはこの端末のみに保存され、外部には送信されません。</div>
   </div>
   <div class="card">
+    <h3>判定モード</h3>
+    <select id="check-mode" style="width:100%; padding:12px; font-size:16px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+      <option value="auto">おまかせ（推奨）— 際どい商品だけ自動で精密判定</option>
+      <option value="eco">節約 — 常に1トークン、精密判定は手動ボタン</option>
+      <option value="full">精密 — 常に出品一覧まで取得（約13トークン）</option>
+    </select>
+    <div class="note">おまかせ: 明確なOK/NGは1トークンで確定。判定が変わり得る際どい商品・売価1万円超・出品ゼロ品だけ、自動で出品一覧を取得して「良い」基準で精密判定します（+約13トークン）。</div>
+  </div>
+  <div class="card">
     <h3>手数料設定（FBA・本）</h3>
     <div class="row">
       <div><label>販売手数料 %</label><input type="number" id="fee-pct" value="15"></div>
@@ -141,7 +150,7 @@ const $ = id => document.getElementById(id);
 const yen = n => "¥" + Math.round(n).toLocaleString();
 
 /* ---------- 設定の保存/読込 ---------- */
-const SETTING_KEYS = ["apikey","fee-pct","fee-close","fee-fba","c1-gross","c1-rate","c2-gross","c2-rate","c3-gross","c3-rate","c4-gross","c4-rate","rank-hard"];
+const SETTING_KEYS = ["apikey","check-mode","fee-pct","fee-close","fee-fba","c1-gross","c1-rate","c2-gross","c2-rate","c3-gross","c3-rate","c4-gross","c4-rate","rank-hard"];
 function loadSettings(){
   const s = JSON.parse(localStorage.getItem("settings") || "{}");
   SETTING_KEYS.forEach(k => { if(s[k] !== undefined) $(k).value = s[k]; });
@@ -153,7 +162,7 @@ function saveSettings(){
   alert("保存しました");
 }
 $("btn-save").onclick = saveSettings;
-const DEFAULTS = {"fee-pct":15,"fee-close":80,"fee-fba":350,"c1-gross":300,"c1-rate":15,"c2-gross":550,"c2-rate":17,"c3-gross":650,"c3-rate":18,"c4-gross":1000,"c4-rate":25,"rank-hard":250};
+const DEFAULTS = {"check-mode":"auto","fee-pct":15,"fee-close":80,"fee-fba":350,"c1-gross":300,"c1-rate":15,"c2-gross":550,"c2-rate":17,"c3-gross":650,"c3-rate":18,"c4-gross":1000,"c4-rate":25,"rank-hard":250};
 $("btn-reset").onclick = () => {
   Object.keys(DEFAULTS).forEach(k => $(k).value = DEFAULTS[k]);
   saveSettings();
@@ -180,7 +189,7 @@ function ean13ToIsbn10(ean){
 }
 
 /* ---------- Keepa API ---------- */
-async function keepaLookup(input){
+async function keepaLookup(input, withOffers){
   const key = $("apikey").value.trim();
   if(!key) throw new Error("設定タブでKeepa APIキーを入力してください");
   input = input.replace(/[-\s]/g, "");
@@ -193,7 +202,8 @@ async function keepaLookup(input){
   } else {
     throw new Error("ASIN(10桁)かJAN(13桁)を入力してください");
   }
-  const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1&offers=20&only-live-offers=1&${idParam}`;
+  const offersPart = withOffers ? "&offers=20&only-live-offers=1" : "";
+  const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1${offersPart}&${idParam}`;
   let res;
   try { res = await fetch(url); }
   catch(e){ throw new Error("Keepa APIに接続できませんでした。電波状況を確認してください。"); }
@@ -212,7 +222,8 @@ function parseProduct(p){
   // ライブ出品一覧（offers）から状態別の現在最安を集計 — 状態別の正確な価格はここからしか取れない
   // condition: 1=新品 2=ほぼ新品 3=非常に良い 4=良い 5=可 7-10=コレクター
   let ofGood = null, ofAcc = null, ofUpper = null, ofCol = null, nUsedLive = 0, nColLive = 0;
-  if(p.offers && p.offers.length){
+  const offersChecked = !!(p.offers && p.offers.length);
+  if(offersChecked){
     // liveOffersOrderがあればライブ出品のみ、無ければ全offers（only-live-offers=1指定なので基本ライブのみ）
     const liveOffers = (p.liveOffersOrder && p.liveOffersOrder.length)
       ? p.liveOffersOrder.map(i => p.offers[i])
@@ -229,19 +240,24 @@ function parseProduct(p){
       else if(c >= 7 && c <= 10){ nColLive++; if(ofCol === null || total < ofCol) ofCol = total; }
     }
   }
-  // 売価: 「状態・良い」の現在価格が基準。無ければ現在の他状態へフォールバック（過去データには落ちない）
-  const usedGood = ofGood ?? v(21);
-  const usedUpper = ofUpper ?? v(20) ?? v(19);
-  const usedAcc = ofAcc ?? v(22);
+  // 売価の基準:
+  //   精密（offers取得済）: ライブ出品の「良い」→上位状態→可→最安 の順（正確な状態別）
+  //   簡易（1トークン）: 常に「中古最安」で統一（保守的）。statsの状態別データは古い可能性があるため使わない
+  const usedGood = ofGood, usedUpper = ofUpper, usedAcc = ofAcc;
   const usedAny = v(2), buybox = v(18), newP = v(1);
   const avg = (p.stats && p.stats.avg90) || [];
   const a = i => (avg[i] !== undefined && avg[i] !== -1) ? avg[i] : null;
   let price = null, priceCond = "";
-  if(usedGood !== null){ price = usedGood; priceCond = "良い・送料込"; }
-  else if(usedUpper !== null){ price = usedUpper; priceCond = "非常に良い以上・送料込"; }
-  else if(usedAcc !== null){ price = usedAcc; priceCond = "可・送料込"; }
-  else if(usedAny !== null){ price = usedAny; priceCond = "中古最安・状態不問"; }
-  else { price = buybox ?? newP; if(price !== null) priceCond = "カート/新品"; }
+  if(offersChecked){
+    if(usedGood !== null){ price = usedGood; priceCond = "良い・送料込"; }
+    else if(usedUpper !== null){ price = usedUpper; priceCond = "非常に良い以上・送料込"; }
+    else if(usedAcc !== null){ price = usedAcc; priceCond = "可・送料込"; }
+    else if(usedAny !== null){ price = usedAny; priceCond = "中古最安・状態不問"; }
+    else { price = buybox ?? newP; if(price !== null) priceCond = "カート/新品"; }
+  } else {
+    if(usedAny !== null){ price = usedAny; priceCond = "中古最安・簡易"; }
+    else { price = buybox ?? newP; if(price !== null) priceCond = "カート/新品"; }
+  }
   // コレクター出品（中古とは別枠。プレミア本では実質的なライバル）
   const colPrice = ofCol ?? v(5), countCol = nColLive > 0 ? nColLive : (v(14) ?? 0);
   // 全期間履歴のスキャン（中古＋コレクター）: 「供給が絶えて売れてないように見える」プレミア本の検出用
@@ -293,7 +309,7 @@ function parseProduct(p){
   const sold = salesEv.length ? { count: salesEv.length, last: { price: salesEv[salesEv.length-1].price, date: kdate(salesEv[salesEv.length-1].t) } } : null;
   // 中古出品ゼロの場合: コレクター最安 -> 90日平均 -> 全期間履歴（実売価格 or 最安記録） を参考相場に
   let noUsedStock = false, histOnly = false;
-  const hasUsed = [usedUpper, usedGood, usedAcc, usedAny].some(x => x !== null);
+  const hasUsed = offersChecked ? [usedUpper, usedGood, usedAcc, usedAny].some(x => x !== null) : (usedAny !== null);
   if(!hasUsed){
     noUsedStock = true;
     let ref = colPrice ?? a(21) ?? a(2);
@@ -311,7 +327,7 @@ function parseProduct(p){
     countUsed: v(12) ?? nUsedLive,
     countNew: v(11) ?? 0,
     amazonStock: v(0) !== null,
-    noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc,
+    noUsedStock, colPrice, countCol, hist, histOnly, sold, priceCond, usedAcc, offersChecked,
     drops30, drops90,
     monthlySales: Math.round(drops90 / 3 * 10) / 10
   };
@@ -409,7 +425,7 @@ function judge(d, cost, cfg){
     if(d.amazonStock) reasons.push("⚠ Amazon本体が新品を販売中 — 新品価格が中古相場の上限になります");
     if(d.countUsed >= 20) reasons.push(`⚠ 中古出品者${d.countUsed}人と多め。価格競争で値下がりリスク`);
     if(d.noUsedStock && level === "ok") level = "warn"; // 参考相場ベースなので条件付き扱い
-    if(!d.noUsedStock && d.priceCond && !d.priceCond.startsWith("良い")){
+    if(!d.noUsedStock && d.offersChecked && d.priceCond && !d.priceCond.startsWith("良い")){
       reasons.push(`⚠ 状態「良い」の出品がありません。相場は「${d.priceCond}」を基準にしています。「良い」で出品すれば一段高く売れる可能性あり`);
     }
     const lowCond = d.usedAcc ?? d.usedAny;
@@ -458,31 +474,72 @@ $("csvfile").onchange = async e => {
 (function(){ const c = Object.keys(getPastList()).length; if(c) $("csv-status").textContent = `✅ ${(c/2|0).toLocaleString()}件 読み込み済み`; })();
 
 /* ---------- 判定実行 ---------- */
-$("btn-check").onclick = async () => {
+// おまかせモード: 簡易判定の結論が「揺らぐ」可能性がある場合だけ自動で精密判定に切り替える
+function needEscalation(d, j, cost, cfg){
+  if(d.noUsedStock) return true;                       // 中古出品ゼロ → ライブ出品で真偽確認
+  if(d.price === null) return false;                   // 完全無データはoffersでも救えない
+  if(d.price >= 10000) return true;                    // 高額品は常に正確に
+  if(cost === null) return false;                      // 損益分岐モードは保守的な値でOK
+  if(j.level === "ok") return false;                   // 最安基準でOK → 良い基準でも必ずOK
+  // 売価を1.5倍（良い基準の上振れ想定）で再判定して結論が変わるなら「際どい」
+  const j15 = judge(Object.assign({}, d, { price: Math.round(d.price * 1.5) }), cost, cfg);
+  return j15.level !== j.level;
+}
+function addAutoNote(d, j, cost){
+  if(d.noUsedStock) return;
+  if(cost === null){
+    j.reasons.push("※ 損益分岐は中古最安ベースの保守的な値です（「良い」基準ならこれより余裕があります）");
+  } else if(j.level === "ok"){
+    j.reasons.push("🔒 確定: 最も安く見える「中古最安」基準でもクリアしているため、状態「良い」基準なら確実にOKです（追加トークン不使用）");
+  } else if(j.level === "ng"){
+    j.reasons.push("🔒 確定: 売価を1.5倍に見積もっても基準に届かないため、見送りで確定です（追加トークン不使用）");
+  } else {
+    j.reasons.push("※ 相場は中古最安ベースの保守的な計算です");
+  }
+}
+function getCfg(){
+  return {
+    feePct: Number($("fee-pct").value) || 15,
+    feeClose: Number($("fee-close").value) || 0,
+    feeFba: Number($("fee-fba").value) || 0,
+    c1g: Number($("c1-gross").value), c1r: Number($("c1-rate").value),
+    c2g: Number($("c2-gross").value), c2r: Number($("c2-rate").value),
+    c3g: Number($("c3-gross").value), c3r: Number($("c3-rate").value),
+    c4g: Number($("c4-gross").value), c4r: Number($("c4-rate").value),
+    rankHard: Number($("rank-hard").value) || 250
+  };
+}
+async function runCheck(forceOffers){
   const code = $("code").value.trim();
   const costRaw = $("cost").value.trim();
   const cost = costRaw === "" ? null : Number(costRaw);
   $("check-err").textContent = "";
-  $("result").innerHTML = "";
   if(!code){ $("check-err").textContent = "ASINかJANを入力してください"; return; }
+  $("result").innerHTML = "";
+  const mode = $("check-mode").value || "auto";
+  const withOffers = !!forceOffers || mode === "full";
   const btn = $("btn-check");
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Keepaに照会中...';
   try {
-    const product = await keepaLookup(code);
-    const d = parseProduct(product);
-    const cfg = {
-      feePct: Number($("fee-pct").value) || 15,
-      feeClose: Number($("fee-close").value) || 0,
-      feeFba: Number($("fee-fba").value) || 0,
-      c1g: Number($("c1-gross").value), c1r: Number($("c1-rate").value),
-      c2g: Number($("c2-gross").value), c2r: Number($("c2-rate").value),
-      c3g: Number($("c3-gross").value), c3r: Number($("c3-rate").value),
-      c4g: Number($("c4-gross").value), c4r: Number($("c4-rate").value),
-      rankHard: Number($("rank-hard").value) || 250
-    };
-    const j = judge(d, cost, cfg);
-    renderResult(d, j, cost, code);
+    const cfg = getCfg();
+    let product = await keepaLookup(code, withOffers);
+    let d = parseProduct(product);
+    let j = judge(d, cost, cfg);
+    if(!d.offersChecked && mode === "auto" && !forceOffers){
+      if(needEscalation(d, j, cost, cfg)){
+        btn.innerHTML = '<span class="spin"></span>際どい商品のため精密判定中...';
+        product = await keepaLookup(code, true);
+        d = parseProduct(product);
+        j = judge(d, cost, cfg);
+      } else {
+        addAutoNote(d, j, cost);
+      }
+    }
+    if(!d.offersChecked && mode === "eco" && !d.noUsedStock){
+      j.reasons.push("💡 簡易判定（1トークン）: 相場は中古最安ベースの保守的な計算です。状態「良い」基準で正確に見るには下の「精密判定」ボタンを");
+    }
+    renderResult(d, j, cost, code, mode === "eco" && !d.offersChecked && !d.noUsedStock);
     saveHistory(d, j, cost);
   } catch(e){
     $("check-err").textContent = e.message;
@@ -490,9 +547,10 @@ $("btn-check").onclick = async () => {
     btn.disabled = false;
     btn.textContent = "判定する";
   }
-};
+}
+$("btn-check").onclick = () => runCheck(false);
 
-function renderResult(d, j, cost, inputCode){
+function renderResult(d, j, cost, inputCode, showPrecisionBtn){
   const V = { ok: ["✅ 仕入れOK", "ok"], warn: ["⚠️ 条件付きOK", "warn"], ng: ["❌ 見送り", "ng"] }[j.level];
   const past = getPastList();
   const pastRec = past[d.asin] || past[inputCode.replace(/[-\s]/g,"")];
@@ -517,6 +575,9 @@ function renderResult(d, j, cost, inputCode){
   if(j.breakeven !== null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
   html += `</table>`;
   if(pastRec) html += `<div class="past">📋 <b>過去仕入れ実績あり</b>: ${pastRec[0]} に ${yen(pastRec[1])} で仕入れ → ${yen(pastRec[2])} で出品${d.price !== null && pastRec[2] > 0 ? `<br>現在相場${yen(d.price)}（当時比 ${Math.round(d.price / pastRec[2] * 100)}%）` : ""}<br><span style="color:#a33">※当時と相場が変わっている可能性あり。判定は現在データ基準です</span></div>`;
+  if(showPrecisionBtn){
+    html += `<button class="btn-sub" style="width:100%; margin-top:12px;" onclick="runCheck(true)">🎯 精密判定する — 状態別（良い/可/コレクター）の実売価格で再判定（+約13トークン）</button>`;
+  }
   html += `<div class="row" style="margin-top:12px">
     <a href="https://keepa.com/#!product/5-${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#37474f; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">📈 Keepaでグラフを見る</a>
     <a href="https://www.amazon.co.jp/dp/${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#e88b00; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">🛒 Amazonで見る</a>

@@ -378,10 +378,15 @@ function judge(d, cost, cfg){
   }
 
   const breakeven = d.price - fees - needGross; // この仕入値以下ならOK
-  let gross = null, rate = null;
+  let gross = null, rate = null, minPrice = null;
   if(cost !== null){
     gross = d.price - fees - cost;
     rate = gross / d.price * 100;
+    // 必要販売価格: この仕入値で基準（粗利額と利益率の両方）を満たす最低売価
+    const f = cfg.feePct / 100, c0 = cfg.feeClose + cfg.feeFba, r = band.rate / 100;
+    const p1 = (band.gross + c0 + cost) / (1 - f);
+    const p2 = (1 - f - r) > 0 ? (c0 + cost) / (1 - f - r) : Infinity;
+    minPrice = isFinite(Math.max(p1, p2)) ? Math.ceil(Math.max(p1, p2)) : null;
   }
 
   // 判定
@@ -394,6 +399,7 @@ function judge(d, cost, cfg){
       level = "ng";
       reasons.unshift(`粗利${yen(gross)}（利益率${rate.toFixed(0)}%）— ${band.label}の基準（粗利${yen(needGross)}以上）に届きません`);
       if(breakeven > 0) reasons.push(`仕入値が${yen(breakeven)}以下なら基準クリア`);
+      if(minPrice !== null) reasons.push(`または${yen(minPrice)}以上で売れるなら基準クリア（現在の相場は${yen(d.price)}）`);
     } else {
       reasons.unshift(`粗利${yen(gross)}・利益率${rate.toFixed(0)}% — ${band.label}の基準クリア`);
       if(usedException) reasons.push(usedException);
@@ -433,7 +439,7 @@ function judge(d, cost, cfg){
       reasons.push(`⚠ 下位状態（可など）の最安が${yen(lowCond)}と「良い」${yen(d.price)}より大幅に安く、<b>相場が下に引っ張られるリスク</b>あり。売価はこの差を見て慎重に`);
     }
   }
-  return { level, reasons, fees, needGross, breakeven, gross, rate, band: band.label, usedException };
+  return { level, reasons, fees, needGross, breakeven, gross, rate, minPrice, band: band.label, usedException };
 }
 
 /* ---------- 過去リスト照合 ---------- */
@@ -539,7 +545,7 @@ async function runCheck(forceOffers){
     if(!d.offersChecked && mode === "eco" && !d.noUsedStock){
       j.reasons.push("💡 簡易判定（1トークン）: 相場は中古最安ベースの保守的な計算です。状態「良い」基準で正確に見るには下の「精密判定」ボタンを");
     }
-    renderResult(d, j, cost, code, mode === "eco" && !d.offersChecked && !d.noUsedStock);
+    renderResult(d, j, cost, code, !d.offersChecked);
     saveHistory(d, j, cost);
   } catch(e){
     $("check-err").textContent = e.message;
@@ -572,11 +578,12 @@ function renderResult(d, j, cost, inputCode, showPrecisionBtn){
     <tr><td>Amazon本体</td><td>${d.amazonStock ? "あり ⚠" : "なし"}</td></tr>
     <tr><td>想定手数料（FBA）</td><td>${yen(j.fees)}</td></tr>`;
   if(cost !== null && j.gross !== null) html += `<tr><td>粗利 / 利益率</td><td>${yen(j.gross)} / ${j.rate.toFixed(0)}%</td></tr>`;
-  if(j.breakeven !== null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
+  if(cost !== null && j.minPrice !== null) html += `<tr><td>必要販売価格（基準クリア）</td><td>${yen(j.minPrice)} 以上</td></tr>`;
+  if(cost === null && j.breakeven !== null && j.breakeven > 0) html += `<tr><td>損益分岐仕入値</td><td>${yen(j.breakeven)} 以下</td></tr>`;
   html += `</table>`;
   if(pastRec) html += `<div class="past">📋 <b>過去仕入れ実績あり</b>: ${pastRec[0]} に ${yen(pastRec[1])} で仕入れ → ${yen(pastRec[2])} で出品${d.price !== null && pastRec[2] > 0 ? `<br>現在相場${yen(d.price)}（当時比 ${Math.round(d.price / pastRec[2] * 100)}%）` : ""}<br><span style="color:#a33">※当時と相場が変わっている可能性あり。判定は現在データ基準です</span></div>`;
   if(showPrecisionBtn){
-    html += `<button class="btn-sub" style="width:100%; margin-top:12px;" onclick="runCheck(true)">🎯 精密判定する — 状態別（良い/可/コレクター）の実売価格で再判定（+約13トークン）</button>`;
+    html += `<button class="btn-sub" style="width:100%; margin-top:12px;" onclick="runCheck(true)">🎯 精密リサーチ — 状態別（良い/可/コレクター）のライブ出品価格で再判定（+約13トークン）</button>`;
   }
   html += `<div class="row" style="margin-top:12px">
     <a href="https://keepa.com/#!product/5-${d.asin}" target="_blank" rel="noopener" style="flex:1; text-align:center; padding:12px; background:#37474f; color:#fff; border-radius:10px; text-decoration:none; font-size:14px; font-weight:600;">📈 Keepaでグラフを見る</a>

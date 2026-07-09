@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仕入れ判定チェッカー 更新のお知らせ</title>
+<style>
+  :root{ --green:#1a7f5a; --ink:#222; --sub:#666; --line:#e3e3e3; --bg:#f7f7f5; }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; background:var(--bg); color:var(--ink); line-height:1.9; font-size:15px;}
+  header{background:var(--green); color:#fff; padding:20px 16px;}
+  header h1{margin:0; font-size:19px;}
+  header p{margin:6px 0 0; font-size:13px; opacity:.9;}
+  main{max-width:600px; margin:0 auto; padding:16px;}
+  section{background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 16px; margin-bottom:16px;}
+  h2{font-size:16px; margin:0 0 10px; color:var(--green); border-bottom:2px solid var(--green); padding-bottom:6px;}
+  ul,ol{padding-left:22px; margin:8px 0;}
+  li{margin-bottom:8px;}
+  .box{background:#eef5f1; border-radius:10px; padding:10px 14px; font-size:14px; margin:10px 0;}
+  .warn{background:#fdf6e3;}
+  b.tag{color:var(--green);}
+  footer{text-align:center; font-size:12px; color:var(--sub); padding:20px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>📚 仕入れ判定チェッカー 更新のお知らせ</h1>
+  <p>テスターの皆さまへ — 2026年7月 大型アップデート</p>
+</header>
+<main>
+
+<section>
+  <h2>まず最初にやること（1分）</h2>
+  <ol>
+    <li>アプリを完全に閉じる → <b>開いて、閉じて、もう一度開く</b>（2回目で最新版になります）</li>
+    <li>⚙️設定タブ → <b>「↺ 基準を初期値に戻す」をタップ</b>（判定基準が新しくなったため。APIキーは消えません）</li>
+    <li>設定の「判定モード」が<b>「おまかせ（推奨）」</b>になっていることを確認 → 保存</li>
+  </ol>
+</section>
+
+<section>
+  <h2>大きな変更点</h2>
+  <ul>
+    <li><b class="tag">判定モードを搭載。</b>初期値の「おまかせ」では、普段は1トークンで判定し、<b>判定が変わり得る際どい商品・高額品・出品ゼロ品だけ自動で精密判定</b>（出品一覧を取得、+約13トークン）します。皆さんは何も選ばなくてOK、結論が1つ出ます</li>
+    <li><b class="tag">相場の基準を明確化。</b>精密判定では中古<b>「良い」の実際の出品価格</b>を基準に判定します。「良い」の出品が無いときは「無い」とはっきり表示し、何の価格で計算したかを相場欄のラベルに必ず書きます（例:「良い・送料込」「可・送料込」「中古最安・簡易」）</li>
+    <li><b class="tag">「可」の価格を併記。</b>「良い」が高くても「可」が大幅に安いと相場が下に引っ張られるため、可の最安を表示し、リスクがある場合は警告を出します</li>
+    <li><b class="tag">出品ゼロの本を正しく評価。</b>「データがない＝ダメ」ではなく、ランキング急落（＝実際に売れた痕跡）と過去の出品記録を照合し、「供給が絶えているだけで需要が潜むプレミア候補」と「本当に需要がない本」を区別します</li>
+    <li><b class="tag">両方向の逆算を表示。</b>仕入値を入れないと「<b>いくら以下なら買っていいか</b>（損益分岐仕入値）」、入れると「<b>いくらで売れれば基準クリアか</b>（必要販売価格）」が出ます</li>
+    <li><b class="tag">精密リサーチボタン。</b>簡易で判定が出た後でも、ボタン1つで状態別（良い/可/コレクター）のライブ出品価格による再判定ができます（+約13トークン）</li>
+  </ul>
+</section>
+
+<section>
+  <h2>細かい改善</h2>
+  <ul>
+    <li>基準ぎりぎり下（基準粗利の90%以上）は「見送り」ではなく「条件付きOK・あと¥◯」と表示（機械的な切り捨ての緩和）</li>
+    <li>「見送り」に意味の説明を追加（絶対ダメではなく“型から外れる”の意味）</li>
+    <li>判定結果から「Keepaでグラフを見る」「Amazonで見る」ボタンで直行できます</li>
+    <li>Androidでカメラが起動しない問題を修正。エラーも日本語で原因と対処を表示します（<b>LINEの中で開くとカメラは使えません</b>→Chromeで開いてください）</li>
+    <li>アップデートが反映されない問題を修正（今後は開き直すだけで最新版になります）</li>
+  </ul>
+</section>
+
+<section>
+  <h2>トークン消費の目安</h2>
+  <div class="box">
+    普段の判定: <b>1トークン</b> ／ 際どい商品・高額品・出品ゼロ品（自動）や精密リサーチボタン: <b>約14トークン</b><br>
+    トークンは契約プランに応じて時間で自動回復します。残量は判定ボタンの下に表示されます。
+  </div>
+</section>
+
+<section>
+  <h2>引き続きお願いしたいこと 🙏</h2>
+  <ul>
+    <li><b>判定と自分の感覚がズレた本</b>があったら、①判定画面のスクショ ②ASINかJAN ③自分ならどう判断するか、の3点セットで報告してください</li>
+    <li>表示の意味がわからなかった箇所、操作で迷った箇所も大歓迎です</li>
+  </ul>
+  <div class="box warn">※判定は参考情報です。仕入れの最終判断はご自身でお願いします。</div>
+</section>
+
+<footer>仕入れ判定チェッカー 更新のお知らせ（2026/07）</footer>
+</main>
+</body>
+</html>

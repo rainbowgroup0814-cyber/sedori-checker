@@ -716,6 +716,7 @@ $("btn-scan").onclick = async () => {
     // 書籍は978/979始まりのJANを採用（2段目の192...は無視）
     if(/^97[89]/.test(text) || /^\d{13}$/.test(text)){
       $("code").value = text;
+      resetCostForNewItem();
       if(navigator.vibrate) navigator.vibrate(80);
       stopScan();
       $("btn-check").click();
@@ -748,6 +749,14 @@ document.querySelectorAll(".disc").forEach(b => b.onclick = () => {
   b.style.background = "#cfe8dd";
 });
 
+/* ---------- 新しいスキャン開始時に仕入値をリセット（前の本の値段を引きずらないため） ---------- */
+function resetCostForNewItem(){
+  $("cost").value = "";
+  baseCost = null;
+  $("disc-note").textContent = "";
+  document.querySelectorAll(".disc").forEach(x => x.style.background = "");
+}
+
 /* ---------- 外付けバーコードリーダー連携（Bluetooth HID: キーボードとして高速入力される） ---------- */
 let hidBuf = "", hidLast = 0;
 document.addEventListener("keydown", e => {
@@ -763,6 +772,7 @@ document.addEventListener("keydown", e => {
   if(/^\d$/.test(e.key)){ hidBuf += e.key; }
   else if(e.key === "Enter" && hidBuf.length >= 10){
     $("code").value = hidBuf;
+    resetCostForNewItem();
     hidBuf = "";
     if(navigator.vibrate) navigator.vibrate(80);
     runCheck(false);

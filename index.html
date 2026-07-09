@@ -362,11 +362,11 @@ function judge(d, cost, cfg){
         `この本は${d.rank !== null ? "ランキング" + Math.round(d.rank/10000) + "万位" : "ランキングなし"}・推定月販${d.monthlySales}冊で回転条件（15万位以内 or 月販3冊以上）を満たさないため見送り`
       ], fees: null, needGross: null, breakeven: null, minPrice: null };
     }
-    if(d.price > cap){
-      reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中 → 中古の売価上限を${yen(cap)}（本体−¥500）に補正して判定しています`);
+    if(d.price > d.amazonPrice){
+      reasons.push(`🏷 中古相場${yen(d.price)}がAmazon新品${yen(d.amazonPrice)}より高いため、判定売価を「Amazon新品−¥500」＝${yen(cap)}に補正して計算しています`);
       d.price = cap;
     } else {
-      reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中（中古相場${yen(d.price)}はそれより安いためそのまま判定。値付けは本体−¥500を意識）`);
+      reasons.push(`🏷 Amazon本体が新品${yen(d.amazonPrice)}を販売中。中古相場${yen(d.price)}は新品より安いためそのまま判定します`);
     }
   }
 

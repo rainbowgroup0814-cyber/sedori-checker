@@ -24,9 +24,10 @@
   main{padding:14px; max-width:560px; margin:0 auto;}
   .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px;}
   label{display:block; font-size:13px; color:var(--sub); margin:10px 0 4px;}
-  input[type=text],input[type=number],input[type=password]{
+  input[type=text],input[type=number]{
     width:100%; padding:12px; font-size:17px; border:1px solid var(--line); border-radius:10px; background:#fff;
   }
+  .masked-input{-webkit-text-security:disc;}
   .row{display:flex; gap:10px;}
   .row>div{flex:1;}
   button{cursor:pointer; border:none; border-radius:10px; font-size:16px; font-weight:600;}
@@ -44,6 +45,15 @@
   .verdict h2{margin:0 0 4px; font-size:26px;}
   .verdict.ok h2{color:var(--green);} .verdict.warn h2{color:var(--yellow);} .verdict.ng h2{color:var(--red);}
   .verdict .title{font-size:14px; color:var(--ink); margin-bottom:8px; font-weight:600;}
+  .recommend{background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:12px; padding:12px 14px; margin:10px 0;}
+  .recommend-head{display:flex; align-items:baseline; justify-content:space-between; gap:10px;}
+  .recommend-head span{font-size:14px; font-weight:700;}
+  .recommend-head strong{font-size:28px; color:var(--green);}
+  .recommend-bar{height:9px; background:#e8e8e8; border-radius:20px; overflow:hidden; margin-top:7px;}
+  .recommend-bar span{display:block; height:100%; background:var(--green); border-radius:20px;}
+  .recommend details{margin-top:8px;}
+  .recommend summary{font-size:12px; color:var(--sub);}
+  .recommend-breakdown{font-size:12px; color:var(--sub); line-height:1.7; margin-top:6px;}
   .reasons{margin:8px 0 0; padding-left:18px; font-size:14px; line-height:1.7;}
   table.data{width:100%; border-collapse:collapse; font-size:14px;}
   table.data td{padding:7px 4px; border-bottom:1px solid var(--line);}
@@ -97,7 +107,7 @@
 <div class="page" id="page-settings">
   <div class="card">
     <h3>Keepa API キー <span class="badge">必須</span></h3>
-    <input type="password" id="apikey" placeholder="KeepaのAPIキーを貼り付け">
+    <input type="text" id="apikey" class="masked-input" placeholder="KeepaのAPIキーを貼り付け" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div class="note">Keepaにログイン → <b>keepa.com/#!api</b> でキーを確認できます（API付きプランの契約が必要）。キーはこの端末のみに保存され、外部には送信されません。</div>
   </div>
   <div class="card">
@@ -499,6 +509,43 @@ function judge(d, cost, cfg){
   return { level, reasons, fees, needGross, breakeven, gross, rate, minPrice, band: band.label, usedException };
 }
 
+/* ---------- 仕入れ推奨度（仕入値入力時のみ） ---------- */
+function calculateRecommendation(d, j, cost){
+  if(cost === null || !Number.isFinite(j.gross) || !Number.isFinite(j.needGross) || j.needGross <= 0) return null;
+  const clamp = n => Math.max(0, Math.min(1, n));
+
+  // 以前決めた配点: 利益30 / ROI20 / 月間販売数20 / ランキング15 / 出品者数15
+  const profitScore = Math.round(30 * clamp(j.gross / j.needGross));
+  const roi = cost > 0 ? j.gross / cost * 100 : (j.gross > 0 ? 100 : 0);
+  const roiScore = Math.round(20 * clamp(roi / 100));
+  const salesScore = Math.round(20 * clamp(d.monthlySales / 3));
+
+  let rankScore = 0;
+  if(d.rank !== null){
+    if(d.rank <= 150000) rankScore = 15;
+    else if(d.rank <= 300000) rankScore = 12;
+    else if(d.rank <= 900000) rankScore = 8;
+    else if(d.rank <= 2500000) rankScore = 4;
+  }
+
+  const sellers = Math.max(0, Number(d.countUsed) || 0);
+  const sellerScore = Math.round(15 * clamp((20 - sellers) / 20));
+  let total = profitScore + roiScore + salesScore + rankScore + sellerScore;
+
+  // 現在の総合判定と矛盾する高得点は出さない
+  if(j.level === "warn") total = Math.min(total, 79);
+  if(j.level === "ng") total = Math.min(total, 49);
+
+  return {
+    total,
+    profitScore,
+    roiScore,
+    salesScore,
+    rankScore,
+    sellerScore
+  };
+}
+
 /* ---------- 過去リスト照合 ---------- */
 function getPastList(){ try { return JSON.parse(localStorage.getItem("pastlist") || "{}"); } catch(e){ return {}; } }
 $("csvfile").onchange = async e => {
@@ -602,6 +649,7 @@ async function runCheck(forceOffers){
     if(!d.offersChecked && mode === "eco" && !d.noUsedStock){
       j.reasons.push("💡 簡易判定（1トークン）: 相場は中古最安ベースの保守的な計算です。状態「良い」基準で正確に見るには下の「精密判定」ボタンを");
     }
+    j.recommendation = calculateRecommendation(d, j, cost);
     renderResult(d, j, cost, code, !d.offersChecked);
     saveHistory(d, j, cost);
   } catch(e){
@@ -620,6 +668,11 @@ function renderResult(d, j, cost, inputCode, showPrecisionBtn){
   let html = `<div class="verdict ${V[1]}">
     <h2>${V[0]}</h2>
     <div class="title">${d.title}</div>
+    ${j.recommendation ? `<div class="recommend">
+      <div class="recommend-head"><span>仕入れ推奨度</span><strong>${j.recommendation.total}%</strong></div>
+      <div class="recommend-bar"><span style="width:${j.recommendation.total}%"></span></div>
+      <details><summary>点数の内訳</summary><div class="recommend-breakdown">利益額 ${j.recommendation.profitScore}/30点　仕入れ額に対する利益率 ${j.recommendation.roiScore}/20点<br>月間販売数 ${j.recommendation.salesScore}/20点　ランキング ${j.recommendation.rankScore}/15点　出品者数 ${j.recommendation.sellerScore}/15点</div></details>
+    </div>` : ""}
     ${d.amazonStock ? `<div style="background:#fff3e0; border:2px solid #e88b00; color:#a35400; border-radius:10px; padding:9px 12px; margin:6px 0 10px; font-weight:700; font-size:15px;">🅰 Amazon本体が新品${d.amazonPrice !== null ? " " + yen(d.amazonPrice) : ""}で販売中！<span style="font-weight:400; font-size:13px;"><br>中古は本体より安くないと売れません（回転の早い本のみ対象）</span></div>` : ""}
     ${!d.amazonStock && d.newP !== null && d.price !== null && d.price >= d.newP - 500 && d.countNew > 0 ? `<div style="background:#fffbe6; border:2px solid #c9a227; color:#7a5f00; border-radius:10px; padding:9px 12px; margin:6px 0 10px; font-weight:700; font-size:15px;">🆕 Amazon以外の新品 最安${yen(d.newP)} あり — 出荷日数を要確認<span style="font-weight:400; font-size:13px;"><br>取り寄せ表示なら無在庫販売＝新品より高くても売れる可能性あり</span></div>` : ""}
     <ul class="reasons">${j.reasons.map(r => `<li>${r}</li>`).join("")}</ul>

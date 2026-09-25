@@ -35,6 +35,9 @@
   .btn-main:disabled{background:#aaa;}
   .btn-sub{padding:12px 14px; background:#eef2f0; color:var(--green); font-size:14px;}
   .btn-scan{width:100%; padding:13px; background:#2c3e50; color:#fff; margin-top:8px;}
+  .btn-voice{width:100%; padding:13px; background:#5b3f91; color:#fff; margin-top:8px;}
+  .btn-voice.listening{background:#b3261e;}
+  .voice-status{font-size:13px; color:var(--sub); line-height:1.6; margin-top:7px; min-height:1.6em;}
   #video-wrap{display:none; margin-top:10px; position:relative; border-radius:12px; overflow:hidden; background:#000;}
   #video{width:100%; display:block;}
   #scan-line{position:absolute; left:8%; right:8%; top:50%; height:2px; background:rgba(255,60,60,.9);}
@@ -82,8 +85,10 @@
 <div class="page active" id="page-check">
   <div class="card">
     <label>ASIN または JAN（ISBN）</label>
-    <input type="text" id="code" inputmode="text" placeholder="例: 4062195909 / 9784062195904" autocomplete="off">
+    <input type="text" id="code" inputmode="text" placeholder="例: 406219590 / 4062195909 / 9784062195904" autocomplete="off">
     <button class="btn-scan" id="btn-scan">📷 バーコードをスキャン</button>
+    <button class="btn-voice" id="btn-voice">🎤 連続音声入力を開始</button>
+    <div class="voice-status" id="voice-status">例：「ISBN 406219590、仕入れ値1200円」</div>
     <div id="video-wrap"><video id="video" playsinline muted autoplay></video><div id="scan-line"></div></div>
     <label>仕入値（円・空欄なら損益分岐を計算）</label>
     <input type="number" id="cost" inputmode="numeric" placeholder="例: 800">
@@ -199,7 +204,8 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 
 /* ---------- ISBN変換 (EAN13 -> ISBN10 = 日本の書籍ASIN) ---------- */
 function ean13ToIsbn10(ean){
-  if(!/^97[89]\d{10}$/.test(ean)) return null;
+  // ISBN-10へ変換できるのは978始まりだけ。979始まりは13桁コードのままKeepaへ渡す。
+  if(!/^978\d{10}$/.test(ean)) return null;
   const core = ean.slice(3, 12);
   let sum = 0;
   for(let i = 0; i < 9; i++) sum += (10 - i) * Number(core[i]);
@@ -207,11 +213,20 @@ function ean13ToIsbn10(ean){
   return core + (chk === 10 ? "X" : String(chk));
 }
 
+function isbn13FromShort9(shortCode){
+  if(!/^4\d{8}$/.test(shortCode)) return null;
+  const first12 = "978" + shortCode;
+  let sum = 0;
+  for(let i = 0; i < 12; i++) sum += Number(first12[i]) * (i % 2 === 0 ? 1 : 3);
+  return first12 + String((10 - sum % 10) % 10);
+}
+
 /* ---------- Keepa API ---------- */
 async function keepaLookup(input, withOffers){
   const key = $("apikey").value.trim();
   if(!key) throw new Error("設定タブでKeepa APIキーを入力してください");
   input = input.replace(/[-\s]/g, "");
+  if(/^4\d{8}$/.test(input)) input = isbn13FromShort9(input);
   let idParam;
   if(/^\d{13}$/.test(input)){
     const isbn = ean13ToIsbn10(input);
@@ -219,7 +234,7 @@ async function keepaLookup(input, withOffers){
   } else if(/^[A-Z0-9]{10}$/i.test(input)){
     idParam = "asin=" + input.toUpperCase();
   } else {
-    throw new Error("ASIN(10桁)かJAN(13桁)を入力してください");
+    throw new Error("4から始まる9桁、ISBN・ASINの10桁、またはJANの13桁を入力してください");
   }
   const offersPart = withOffers ? "&offers=20&only-live-offers=1" : "";
   const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1${offersPart}&${idParam}`;
@@ -619,7 +634,7 @@ function getCfg(){
     rankHard: Number($("rank-hard").value) || 250
   };
 }
-async function runCheck(forceOffers){
+async function runCheck(forceOffers, readAloud){
   const code = $("code").value.trim();
   const costRaw = $("cost").value.trim();
   const cost = costRaw === "" ? null : Number(costRaw);
@@ -652,14 +667,225 @@ async function runCheck(forceOffers){
     j.recommendation = calculateRecommendation(d, j, cost);
     renderResult(d, j, cost, code, !d.offersChecked);
     saveHistory(d, j, cost);
+    if(readAloud && continuousVoiceMode) await speakJudgment(d, j, cost);
+    return { d, j, cost };
   } catch(e){
     $("check-err").textContent = e.message;
+    if(readAloud && continuousVoiceMode) await speakText("判定できませんでした。" + e.message);
+    return null;
   } finally {
     btn.disabled = false;
     btn.textContent = "判定する";
   }
 }
 $("btn-check").onclick = () => runCheck(false);
+
+/* ---------- 音声入力・判定結果の読み上げ ---------- */
+const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+let voiceRecognition = null;
+let continuousVoiceMode = false;
+let voiceProcessing = false;
+let voiceRestartTimer = null;
+let voiceWakeLock = null;
+
+function validIsbn13(isbn){
+  if(!/^97[89]\d{10}$/.test(isbn)) return false;
+  let sum = 0;
+  for(let i = 0; i < 12; i++) sum += Number(isbn[i]) * (i % 2 === 0 ? 1 : 3);
+  return (10 - sum % 10) % 10 === Number(isbn[12]);
+}
+
+function validIsbn10(isbn){
+  if(!/^\d{9}[\dX]$/.test(isbn)) return false;
+  let sum = 0;
+  for(let i = 0; i < 9; i++) sum += (10 - i) * Number(isbn[i]);
+  const last = isbn[9] === "X" ? 10 : Number(isbn[9]);
+  return (sum + last) % 11 === 0;
+}
+
+function parseVoiceInput(text){
+  const normalized = text.normalize("NFKC");
+  let cost = null;
+  const costMatch = normalized.match(/(?:仕入れ値|仕入値|仕入れ|値段|価格|原価)[^0-9]{0,8}([0-9０-９,，\s]+)(?:円|えん)?/);
+  if(costMatch){
+    const parsed = Number(costMatch[1].normalize("NFKC").replace(/\D/g, ""));
+    if(Number.isFinite(parsed) && parsed > 0) cost = parsed;
+  }
+
+  const isbnSource = costMatch
+    ? normalized.slice(0, costMatch.index) + normalized.slice(costMatch.index + costMatch[0].length)
+    : normalized;
+  const compact = isbnSource.toUpperCase().replace(/エックス/g, "X").replace(/[^0-9X]/g, "");
+
+  const isbn13Match = compact.match(/97[89]\d{10}/);
+  if(isbn13Match){
+    if(!validIsbn13(isbn13Match[0])) return { error: "聞き取ったISBNの数字が正しくありません。もう一度読み上げてください。" };
+    return { isbn: isbn13Match[0], cost };
+  }
+
+  const isbn10Match = compact.match(/4\d{8}[\dX]/);
+  if(isbn10Match && validIsbn10(isbn10Match[0])) return { isbn: isbn10Match[0], cost };
+
+  const shortMatch = compact.match(/4\d{8}/);
+  if(shortMatch) return { isbn: isbn13FromShort9(shortMatch[0]), cost };
+
+  return { error: "ISBNを聞き取れませんでした。数字を区切りながら、もう一度読み上げてください。" };
+}
+
+function plainText(html){
+  const el = document.createElement("div");
+  el.innerHTML = html || "";
+  return (el.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+function speakText(text){
+  return new Promise(resolve => {
+    if(!("speechSynthesis" in window)){ resolve(); return; }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "ja-JP";
+    utterance.rate = 1;
+    utterance.onend = resolve;
+    utterance.onerror = resolve;
+    window.speechSynthesis.speak(utterance);
+  });
+}
+
+function speakJudgment(d, j, cost){
+  const verdict = { ok: "仕入れオーケー", warn: "条件付きオーケー", ng: "見送り" }[j.level];
+  const parts = [`タイトルは、${d.title}。判定は、${verdict}です。`];
+  if(j.recommendation) parts.push(`仕入れ推奨度は${j.recommendation.total}パーセントです。`);
+  if(cost !== null && j.gross !== null && j.gross !== undefined) parts.push(`予想粗利は${Math.round(j.gross)}円です。`);
+  if(cost === null && j.breakeven !== null && j.breakeven !== undefined && j.breakeven > 0) parts.push(`基準を満たす仕入れ値は、${Math.round(j.breakeven)}円以下です。`);
+  const reason = plainText(j.reasons && j.reasons[0]);
+  if(reason) parts.push(`主な理由は、${reason}です。`);
+  return speakText(parts.join(""));
+}
+
+function setVoiceModeUi(active){
+  $("btn-voice").classList.toggle("listening", active);
+  $("btn-voice").textContent = active ? "■ 連続音声入力を停止" : "🎤 連続音声入力を開始";
+}
+
+function scheduleVoiceRestart(delay = 700){
+  clearTimeout(voiceRestartTimer);
+  if(!continuousVoiceMode || voiceProcessing) return;
+  voiceRestartTimer = setTimeout(startVoiceRecognition, delay);
+}
+
+async function requestVoiceWakeLock(){
+  if(!continuousVoiceMode || !("wakeLock" in navigator)) return;
+  try { voiceWakeLock = await navigator.wakeLock.request("screen"); }
+  catch(e){ voiceWakeLock = null; }
+}
+
+function startVoiceRecognition(){
+  if(!continuousVoiceMode || voiceRecognition || voiceProcessing) return;
+  if(document.visibilityState === "hidden"){
+    $("voice-status").textContent = "画面に戻ると音声入力を再開します。";
+    return;
+  }
+  const recognition = new SpeechRecognitionAPI();
+  voiceRecognition = recognition;
+  recognition.lang = "ja-JP";
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 3;
+  $("voice-status").textContent = "待機中です。ISBNと、必要なら仕入れ値を話してください。";
+
+  recognition.onresult = async event => {
+    voiceProcessing = true;
+    const alternatives = Array.from(event.results[0]).map(x => x.transcript);
+    let parsed = null, heard = alternatives[0] || "";
+    for(const transcript of alternatives){
+      const candidate = parseVoiceInput(transcript);
+      if(!candidate.error){ parsed = candidate; heard = transcript; break; }
+      if(!parsed) parsed = candidate;
+    }
+    if(!parsed || parsed.error){
+      const message = parsed ? parsed.error : "音声を聞き取れませんでした。もう一度お試しください。";
+      $("voice-status").textContent = `聞き取り内容：「${heard}」 ${message}`;
+      await speakText(message);
+      voiceProcessing = false;
+      scheduleVoiceRestart();
+      return;
+    }
+
+    $("code").value = parsed.isbn;
+    if(parsed.cost !== null){
+      $("cost").value = parsed.cost;
+      baseCost = parsed.cost;
+    } else {
+      resetCostForNewItem();
+    }
+    $("voice-status").textContent = `ISBN ${parsed.isbn}${parsed.cost !== null ? `、仕入れ値${parsed.cost.toLocaleString()}円` : "、仕入れ値なし"}で判定します。`;
+    await runCheck(false, true);
+    voiceProcessing = false;
+    if(continuousVoiceMode) $("voice-status").textContent = "次のISBNを待っています。";
+    scheduleVoiceRestart();
+  };
+  recognition.onerror = event => {
+    if(event.error === "not-allowed" || event.error === "service-not-allowed"){
+      continuousVoiceMode = false;
+      setVoiceModeUi(false);
+      $("voice-status").textContent = "マイクの使用が許可されていません。ブラウザの設定でマイクを許可してください。";
+    } else if(event.error !== "no-speech" && event.error !== "aborted"){
+      $("voice-status").textContent = "音声入力が途切れました。自動で再開します。";
+    }
+  };
+  recognition.onend = () => {
+    if(voiceRecognition === recognition) voiceRecognition = null;
+    scheduleVoiceRestart();
+  };
+  try {
+    recognition.start();
+  } catch(e){
+    voiceRecognition = null;
+    scheduleVoiceRestart(1200);
+  }
+}
+
+function stopContinuousVoice(){
+  continuousVoiceMode = false;
+  voiceProcessing = false;
+  clearTimeout(voiceRestartTimer);
+  if(voiceRecognition){
+    try { voiceRecognition.abort(); } catch(e){}
+    voiceRecognition = null;
+  }
+  if("speechSynthesis" in window) window.speechSynthesis.cancel();
+  if(voiceWakeLock){
+    voiceWakeLock.release().catch(() => {});
+    voiceWakeLock = null;
+  }
+  setVoiceModeUi(false);
+  $("voice-status").textContent = "連続音声入力を停止しました。";
+}
+
+$("btn-voice").onclick = () => {
+  $("check-err").textContent = "";
+  if(!SpeechRecognitionAPI){
+    $("voice-status").textContent = "このブラウザは音声入力に対応していません。SafariまたはChromeの最新版でお試しください。";
+    return;
+  }
+  if(continuousVoiceMode){
+    stopContinuousVoice();
+    return;
+  }
+
+  if("speechSynthesis" in window) window.speechSynthesis.cancel();
+  continuousVoiceMode = true;
+  setVoiceModeUi(true);
+  requestVoiceWakeLock();
+  startVoiceRecognition();
+};
+
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState === "visible" && continuousVoiceMode){
+    requestVoiceWakeLock();
+    scheduleVoiceRestart(300);
+  }
+});
 
 function renderResult(d, j, cost, inputCode, showPrecisionBtn){
   const V = { ok: ["✅ 仕入れOK", "ok"], warn: ["⚠️ 条件付きOK", "warn"], ng: ["❌ 見送り", "ng"] }[j.level];

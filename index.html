@@ -238,10 +238,18 @@ async function keepaLookup(input, withOffers){
   }
   const offersPart = withOffers ? "&offers=20&only-live-offers=1" : "";
   const url = `https://api.keepa.com/product?key=${key}&domain=5&stats=90&history=1${offersPart}&${idParam}`;
-  let res;
-  try { res = await fetch(url); }
-  catch(e){ throw new Error("Keepa APIに接続できませんでした。電波状況を確認してください。"); }
-  const data = await res.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  let data;
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    data = await res.json();
+  } catch(e){
+    if(e.name === "AbortError") throw new Error("Keepaへの照会が30秒を超えました。電波状況を確認して、もう一度お試しください。");
+    throw new Error("Keepa APIに接続できませんでした。電波状況を確認してください。");
+  } finally {
+    clearTimeout(timeout);
+  }
   if(data.error) throw new Error("Keepaエラー: " + (data.error.message || JSON.stringify(data.error)));
   if(!data.products || !data.products.length || !data.products[0].title) throw new Error("商品が見つかりませんでした");
   $("tokens").textContent = "残りトークン: " + data.tokensLeft;
@@ -667,10 +675,17 @@ async function runCheck(forceOffers, readAloud){
     j.recommendation = calculateRecommendation(d, j, cost);
     renderResult(d, j, cost, code, !d.offersChecked);
     saveHistory(d, j, cost);
-    if(readAloud && continuousVoiceMode) await speakJudgment(d, j, cost);
+    btn.disabled = false;
+    btn.textContent = "判定する";
+    if(readAloud && continuousVoiceMode){
+      $("voice-status").textContent = "判定が完了しました。結果を読み上げています。";
+      await speakJudgment(d, j, cost);
+    }
     return { d, j, cost };
   } catch(e){
     $("check-err").textContent = e.message;
+    btn.disabled = false;
+    btn.textContent = "判定する";
     if(readAloud && continuousVoiceMode) await speakText("判定できませんでした。" + e.message);
     return null;
   } finally {
@@ -741,12 +756,24 @@ function plainText(html){
 function speakText(text){
   return new Promise(resolve => {
     if(!("speechSynthesis" in window)){ resolve(); return; }
+    let finished = false;
+    const finish = () => {
+      if(finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "ja-JP";
     utterance.rate = 1;
-    utterance.onend = resolve;
-    utterance.onerror = resolve;
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    const waitMs = Math.max(5000, Math.min(25000, text.length * 200));
+    const timeout = setTimeout(() => {
+      window.speechSynthesis.cancel();
+      finish();
+    }, waitMs);
     window.speechSynthesis.speak(utterance);
   });
 }
@@ -862,7 +889,7 @@ function stopContinuousVoice(){
   $("voice-status").textContent = "連続音声入力を停止しました。";
 }
 
-$("btn-voice").onclick = () => {
+$("btn-voice").onclick = async () => {
   $("check-err").textContent = "";
   if(!SpeechRecognitionAPI){
     $("voice-status").textContent = "このブラウザは音声入力に対応していません。SafariまたはChromeの最新版でお試しください。";
@@ -877,7 +904,9 @@ $("btn-voice").onclick = () => {
   continuousVoiceMode = true;
   setVoiceModeUi(true);
   requestVoiceWakeLock();
-  startVoiceRecognition();
+  $("voice-status").textContent = "音声機能を準備しています。";
+  await speakText("連続音声入力を開始します。ISBNと仕入れ値を話してください。");
+  if(continuousVoiceMode) startVoiceRecognition();
 };
 
 document.addEventListener("visibilitychange", () => {

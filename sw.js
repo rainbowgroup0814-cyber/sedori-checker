@@ -1,6 +1,6 @@
-// 仕入れ判定チェッカー Service Worker v6
+// 仕入れ判定チェッカー Service Worker v7
 // ネットワーク優先＋HTMLはブラウザキャッシュも迂回して常に再検証
-const CACHE = "sedori-checker-v6";
+const CACHE = "sedori-checker-v7";
 const ASSETS = ["./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
